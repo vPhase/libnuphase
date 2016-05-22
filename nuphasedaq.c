@@ -31,7 +31,7 @@
 #define NBD(d) (d->fd[1] ? 2 : 1)
 
 #define MIN_GOOD_MAX_V 20 
-#define MAX_MISERY 25 
+#define MAX_MISERY 100 
 
 #define SPI_CAST  (uintptr_t) 
 
@@ -215,6 +215,8 @@ static int do_read(int fd, uint8_t * p)
 
 
 
+#define N_SCALER_REGISTERS  (NP_NUM_SCALERS * (1 + NP_NUM_BEAMS)/2) 
+
 // all possible buffers we might batch
 static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
 static uint8_t buf_set_read_reg[NP_NUM_REGISTER][NP_SPI_BYTES];
@@ -224,7 +226,7 @@ static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_reset_buf[NP_SPI_BYTES] = {REG_CLEAR,0,1,0};
-static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+static uint8_t buf_pick_scaler[NP_NUM_BEAMS][N_SCALER_REGISTERS]; 
 
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
 
@@ -297,7 +299,7 @@ void fillBuffers()
   }
 
   memset(buf_pick_scaler,0,sizeof(buf_pick_scaler)); 
-  for (i = 0; i < NP_NUM_BEAMS; i++)
+  for (i = 0; i < N_SCALER_REGISTERS; i++)
   {
     buf_pick_scaler[i][0]=REG_PICK_SCALER; 
     buf_pick_scaler[i][3]=i;  
@@ -432,8 +434,8 @@ static int mark_buffers_done(nuphase_dev_t * d,  nuphase_buffer_mask_t buf)
     ret+=buffer_send(d,MASTER); //flush so we can clear the buffer immediately 
     if (data_status[3] & (buf))
     {
-      fprintf(stderr,"Did not clear buffer mask %x ? (or rate too high? buf mask after clearing: %x))\n", buf, data_status[3] & 0xf) ; 
-      easy_break_point(); 
+//      fprintf(stderr,"Did not clear buffer mask %x ? (or rate too high? buf mask after clearing: %x))\n", buf, data_status[3] & 0xf) ; 
+ //     easy_break_point(); 
     }
     DONE(d); 
     return ret; 
@@ -451,14 +453,14 @@ static int mark_buffers_done(nuphase_dev_t * d,  nuphase_buffer_mask_t buf)
     {
       if (cleared_master[3] & ( buf))
       {
-        fprintf(stderr,"Did not clear buffer mask %x for master ? (or rate too high? buf mask after clearing: %x))\n", buf, cleared_master[3] & 0xf) ; 
-        easy_break_point(); 
+//        fprintf(stderr,"Did not clear buffer mask %x for master ? (or rate too high? buf mask after clearing: %x))\n", buf, cleared_master[3] & 0xf) ; 
+//       easy_break_point(); 
       }
 
       if (cleared_slave[3] & (buf))
       {
-        fprintf(stderr,"Did not clear buffer %x for master ? (or rate too high? buf mask after clearing: %x))\n", buf, cleared_slave[3] & 0xf) ; 
-        easy_break_point(); 
+//        fprintf(stderr,"Did not clear buffer %x for master ? (or rate too high? buf mask after clearing: %x))\n", buf, cleared_slave[3] & 0xf) ; 
+//       easy_break_point(); 
       }
 
       if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
@@ -962,13 +964,13 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
 void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which) 
 {
   int i;
-  c->channel_mask = 0xff; 
-  c->pretrigger = 1; //?? 
+  c->channel_mask = which == MASTER?  0xff : 0xf ; 
+  c->pretrigger = 4; //?? 
   c->trigger_mask = 0x7fff; 
 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
-    c->trigger_thresholds[i] = 0x9200;  //over 9000 
+    c->trigger_thresholds[i] = 10000;  //over 9000 
   }
 
   for (i = 0; i < NP_NUM_CHAN; i++)
@@ -1367,16 +1369,16 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
           hd[iout]->sync_problem |= 2; 
         }
 
-        if (abs(hd[iout]->trig_time[ibd] -  hd[iout]->trig_time[0] > 1 ))
+        if (abs(hd[iout]->trig_time[ibd] -  hd[iout]->trig_time[0] > 2 ))
         {
-          fprintf(stderr,"Trig times differ by more than 1 clock cycle between boards!\n"); 
+          fprintf(stderr,"Trig times differ by more than 2 clock cycles between boards!\n"); 
           hd[iout]->sync_problem |= 4; 
         }
 
         if (hwbuf != hd[iout]->buffer_number)
         {
 
-          fprintf(stderr,"Buffer numbers differe between boards!\n"); 
+          fprintf(stderr,"Buffer numbers differ between boards!\n"); 
           hd[iout]->sync_problem |=8; 
         }
       }
@@ -1475,7 +1477,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   int i; 
   int ret = 0; 
   struct timespec now; 
-  uint8_t wide_scalers[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+  uint8_t scaler_registers[N_SCALER_REGISTERS][NP_SPI_BYTES]; 
 
   st->board_id = d->board_id[which]; 
 
@@ -1484,22 +1486,39 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   d->current_mode[which] = MODE_REGISTER; 
   ret+=buffer_append(d,which, buf_update_scalers,0); 
 
-  for (i = 0; i < NP_NUM_BEAMS; i++) 
+  for (i = 0; i < N_SCALER_REGISTERS; i++) 
   {
     ret+=buffer_append(d,which, buf_pick_scaler[i],0); 
-    ret+=append_read_register(d,which, REG_SCALER_READ, wide_scalers[i]); 
+    ret+=append_read_register(d,which, REG_SCALER_READ, scaler_registers[i]); 
   }
 
   clock_gettime(CLOCK_REALTIME, &now); 
   ret+= buffer_send(d,which); 
   DONE(d); 
 
-  if (!ret) return ret; 
-
+  if (ret) return ret; 
   st->deadtime = 0; //TODO 
-  for (i = 0; i < NP_NUM_BEAMS; i++) 
+
+
+  for (i = 0; i < N_SCALER_REGISTERS; i++) 
   {
-    st->scalers[i] = wide_scalers[i][3] | wide_scalers[i][2] << 8 ; 
+    uint16_t first = ((uint16_t)scaler_registers[i][3])  |  (((uint16_t) scaler_registers[i][2] & 0xf ) << 8); 
+    uint16_t second =((uint16_t)(scaler_registers[i][2] >> 4)) |  (((uint16_t) scaler_registers[i][1] ) << 4); 
+    printf("%d %u %u\n", i, first, second); 
+
+    int which_scaler = i / ((1 + NP_RESET_GLOBAL)/2); 
+    int which_channel = i % (( 1 + NP_RESET_GLOBAL)/2); 
+
+    if (which_channel == 0) 
+    {
+      st->global_scalers[which_scaler] = first; 
+      st->beam_scalers[which_scaler][0]= second; 
+    }
+    else
+    {
+      st->beam_scalers[which_scaler][2*which_channel-1]= first; 
+      st->beam_scalers[which_scaler][2*which_channel] = second; 
+    }
   }
   st->readout_time = now.tv_sec; 
   st->readout_time_ns = now.tv_nsec; 
@@ -1540,6 +1559,10 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
                  const nuphase_config_t * cslave,  nuphase_reset_t reset_type)
 {
   
+//  const nuphase_config_t * cfgs[NP_MAX_BOARDS]; 
+//  cfgs[0] = c; 
+//  cfgs[1] = cslave; 
+
   int wrote; 
   int ibd;
 
@@ -1549,14 +1572,11 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
   
   if (reset_type == NP_RESET_GLOBAL) 
   {
-    for (ibd = 0; ibd < NBD(d); ibd++)
+    if (synchronized_command(d,buf_reset_all,0,0,0))
     {
-      wrote = do_write(d->fd[ibd], buf_reset_all); 
-      if (wrote != NP_SPI_BYTES) 
-      {
         return 1;
-      }
     }
+ 
     fprintf(stderr,"Full reset...\n"); 
     //we need to sleep for a while. how about 20 seconds? 
     sleep(20); 
@@ -1582,15 +1602,11 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
 
   if (reset_type == NP_RESET_ADC)
   {
-    for (ibd = 0; ibd < NBD(d); ibd++)
+    if (synchronized_command(d,buf_reset_adc,0,0,0))
     {
-      wrote = do_write(d->fd[ibd], buf_reset_adc); 
-      if (wrote != NP_SPI_BYTES) 
-      {
         return 1;
-      }
     }
-    sleep(10); // ? 
+    sleep(5); // ? 
   }
 
   /* afer all resets (if applicable), we want to restart the event counter 
@@ -1650,7 +1666,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
    *
    *   disable the cal pulser
    */
-  if (0 && reset_type >= NP_RESET_ADC)//temporary disable 
+  if (reset_type >= NP_RESET_ADC)//temporary disable 
   {
     int happy = 0; 
     int misery = 0; 
@@ -1658,7 +1674,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
 
     //temporarily set the buffer length to the maximum 
     uint16_t old_buf_length = d->buffer_length; 
-    d->buffer_length = NP_MAX_WAVEFORM_LENGTH; 
+    d->buffer_length = 1024; 
 
     //release the calpulser 
     nuphase_calpulse(d, 3); 
@@ -1685,6 +1701,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
             fprintf(stderr,"problem sending buf_adc_clk_rst\n"); 
             continue;
           }
+          sleep(1); 
         }
         else
         {
@@ -1715,6 +1732,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
       }
 
 
+
       //read in the first buffer (should really be  0 most of the time.) 
       nuphase_read_single(d, __builtin_ctz(mask),  &d->calib_hd, &d->calib_ev); 
 
@@ -1732,6 +1750,8 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
       {
         for (ichan = 0; ichan <NP_NUM_CHAN; ichan++)
         {
+          if ( ((1<<ichan) & d->channel_read_mask[ibd])  == 0) continue; 
+
           uint8_t max_v = 0; 
           for (isamp = 0; isamp < NP_MAX_WAVEFORM_LENGTH; isamp++)
           {
@@ -1741,6 +1761,8 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
               max_i[ibd][ichan] = isamp; 
             }
           }
+          
+          printf("max_i,max_v for bd %d chan %d is %d,%d\n", ibd,ichan,max_i[ibd][ichan],max_v); 
 
           if (max_i[ibd][ichan] < min_max_i) min_max_i = max_i[ibd][ichan]; 
           if (max_i[ibd][ichan] > max_max_i)  max_max_i = max_i[ibd][ichan]; 
@@ -1769,16 +1791,22 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
       {
         for (iadc = 0; iadc < NP_NUM_CHAN/2; iadc++)
         {
+          if (((1 << 2*iadc) & d->channel_read_mask[ibd])  == 0) continue; 
+
           uint8_t delay  = (max_i[ibd][2*iadc] + max_i[ibd][2*iadc+1]- 2*min_max_i)/2; 
           //TODO!!! 
-          uint8_t buf[NP_SPI_BYTES] = {REG_ADC_DELAYS + iadc, 0, 0, delay}; 
-          wrote = do_write(d->fd[ibd], buf); 
-          if (wrote < NP_SPI_BYTES) 
+          
+          if (delay > 0) 
           {
-            fprintf(stderr,"Should have written %d but wrote %d\n", NP_SPI_BYTES, wrote); 
-            continue;//why not? 
+            uint8_t buf[NP_SPI_BYTES] = {REG_ADC_DELAYS + iadc, 0, (delay & 0xf) | (1 << 4) , (delay & 0xf)  | (1 << 4) }; 
+            wrote = do_write(d->fd[ibd], buf); 
+            if (wrote < NP_SPI_BYTES) 
+            {
+              fprintf(stderr,"Should have written %d but wrote %d\n", NP_SPI_BYTES, wrote); 
+              continue;//why not? 
+            }
           }
-        }
+       }
       }
 
      //yay

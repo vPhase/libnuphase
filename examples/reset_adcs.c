@@ -12,7 +12,7 @@ int main(int nargs, char ** args)
 
   if (nargs < 2) 
   {
-    printf("Usage: global_reset spidev [spidev[2])\n"); 
+    printf("Usage: reset_adcs spidev [spidev[2])\n"); 
     return 1; 
   }
 
@@ -23,7 +23,7 @@ int main(int nargs, char ** args)
   nuphase_config_t cfg_slave; 
   nuphase_config_init(&cfg,MASTER); 
   nuphase_config_init(&cfg_slave,SLAVE); 
-  nuphase_reset(dev,&cfg,nargs > 2 ? &cfg_slave : 0 ,NP_RESET_GLOBAL); 
+  nuphase_reset(dev,&cfg,nargs > 2 ? &cfg_slave : 0 ,NP_RESET_ADC); 
   nuphase_close(dev); 
 
 

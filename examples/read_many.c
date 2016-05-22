@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <sys/time.h> 
 #include <stdlib.h>
+#include <string.h>
 
 // read_many spidev [swtrig=1] [hdfile] [evfile] 
 
@@ -31,7 +32,7 @@ int main(int nargs, char ** args )
   int calpulse = 0;
   if (nargs < 2) 
   {
-    printf("Usage: read_event spidev_master spidev_slave [software trigger = 1] [hdfile=headers.dat]  evfile = [events.dat]\n"); 
+    printf("Usage: read_event spidev_master spidev_slave [software trigger = 1] [calpulser = 0]  [hdfile=headers.dat]  evfile = [events.dat]\n"); 
     return 1; 
   }
 
@@ -60,9 +61,13 @@ int main(int nargs, char ** args )
   int nev = 0; 
   struct timespec start; 
   struct timespec now; 
+  struct timespec last; 
+  struct timespec last_scaler; 
 
   clock_gettime(CLOCK_REALTIME,&now); 
   clock_gettime(CLOCK_REALTIME,&start); 
+  memcpy(&last,&start,sizeof(start)); 
+  memcpy(&last_scaler,&start,sizeof(start)); 
 
   while (!stop)
   {
@@ -83,18 +88,26 @@ int main(int nargs, char ** args )
     clock_gettime(CLOCK_REALTIME,&now); 
     nev+= nevents; 
     double hz = nev / (now.tv_sec - start.tv_sec + now.tv_nsec *1.e-9 - start.tv_nsec*1.e-9); 
+    double instantaneous = nevents  / (now.tv_sec - last.tv_sec + now.tv_nsec *1.e-9 - last.tv_nsec*1.e-9); 
+    memcpy(&last,&now, sizeof(last)); 
     printf("Sent %d sw triggers\n", nsent); 
-    printf("Just read %d events (total= %d, avg rate = %f Hz)\n",nevents, nev, hz); 
+    int missed = (int) (hd[nevents-1].trig_number-hd[nevents-1].event_number); 
+    printf("Just read %d events\n\ttotal= %d,  missed=%d (%0.2f%%) ,rate = (%f Hz/%f Hz)\n",nevents,nev, missed,100.*missed/(nev+missed) ,instantaneous, hz); 
     int i; 
     for (i = 0; i < nevents; i++)
     {
       nuphase_event_write(fev,&ev[i]); 
       nuphase_header_write(fhd,&hd[i]); 
-
     }
-//    nuphase_status_t status; 
-//    nuphase_read_status(dev,&status, MASTER); 
-//    nuphase_status_print(stdout,&status); 
+
+
+    if (now.tv_sec - last_scaler.tv_sec > 10) 
+    {
+      last_scaler.tv_sec = now.tv_sec; 
+      nuphase_status_t status; 
+      nuphase_read_status(dev,&status, MASTER); 
+      nuphase_status_print(stdout,&status); 
+    }
 
   }
   nuphase_calpulse(dev,0); 

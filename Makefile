@@ -1,6 +1,6 @@
 CC=gcc
 LD=gcc
-CFLAGS+=-fPIC -g -Wall -Wextra -O2
+CFLAGS+=-fPIC -g -Wall -Wextra 
 LDFLAGS+= -lpthread -lz 
 
 #uncomment to enable excessive printouts
