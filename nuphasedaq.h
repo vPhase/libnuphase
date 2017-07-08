@@ -4,7 +4,8 @@
 #include "nuphase.h" 
 
 
-
+#define NP_NUM_CHUNK 4 
+#define NP_WORD_SIZE 4 
 
 
 

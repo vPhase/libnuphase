@@ -8,12 +8,10 @@
 #include <stdlib.h>
 #include <linux/spi/spidev.h>
 
-#define NP_SPI_BYTES 4 
 #define NP_ADDRESS_MAX 128 
-#define NP_NUM_CHAN 8 
+#define NP_SPI_BYTES  NP_WORD_SIZE
 #define NP_NUM_MODE 4
 #define NP_NUM_REGISTER 16
-#define NP_NUM_CHUNK 4 
 
 
 //register map 

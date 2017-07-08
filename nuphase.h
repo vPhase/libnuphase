@@ -6,6 +6,8 @@
 #include <stdint.h>
 
 
+#define NP_NUM_CHAN 8 
+
 /* Configuration options, sent to fpga */ 
 
 typedef struct nuphase_config
@@ -48,7 +50,7 @@ typedef struct nuphase_event
 {
   //TODO
   nuphase_header_t header;
-  uint8_t * data[8]; //8 channels of length buffer length
+  uint8_t * data[NP_NUM_CHAN]; //8 channels of length buffer length
 } nuphase_event_t; 
 
 
