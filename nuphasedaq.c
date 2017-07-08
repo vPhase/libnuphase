@@ -45,12 +45,12 @@ typedef enum
 
 
 // all possible buffers we might batch
-static uint8_t buf_mode[NP_NUM_MODE][4];
-static uint8_t buf_set_read_reg[NP_NUM_REGISTER][4];
-static uint8_t buf_channel[NP_NUM_CHAN][4];
-static uint8_t buf_chunk[NP_NUM_CHUNK][4];
-static uint8_t buf_ram_addr[NP_ADDRESS_MAX][4];
-static uint8_t buf_read[4] = {REG_READ,0,0,0}; 
+static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
+static uint8_t buf_set_read_reg[NP_NUM_REGISTER][NP_SPI_BYTES];
+static uint8_t buf_channel[NP_NUM_CHAN][NP_SPI_BYTES];
+static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
+static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
+static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
 
 
 static void fillBuffers() __attribute__((constructor)); //this will fill them
@@ -141,56 +141,51 @@ static int setup_read_register(struct spi_ioc_transfer * xfers, uint8_t address,
 }
 
 
-/* this will use up 3*nchunks + nchunks/4 xfers.  MUST start on chunk 0 */ 
-static int loop_over_chunks_half_duplex(struct spi_ioc_transfer * xfers, uint8_t nchunks, uint8_t start_address, uint8_t * result) 
+/* this will use up 13*naddr xfers.  MUST start on chunk 0 */ 
+static int loop_over_chunks_half_duplex(struct spi_ioc_transfer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
 {
 
+  int iaddr; 
   int ichunk; 
   int ixfer = 0; 
 
-  for (ichunk  =0; ichunk < nchunks; ichunk++) 
+  for (iaddr  =0; iaddr < naddr; iaddr++) 
   {
-    if (ichunk % 4 == 0) 
+    xfers[ixfer++].tx_buf = (uint64_t) buf_ram_addr[ start_address + iaddr]; 
+
+    for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
     {
-      xfers[ixfer++].tx_buf = (uint64_t) buf_ram_addr[ start_address + ichunk/4]; 
+      xfers[ixfer++].tx_buf = (uint64_t) buf_chunk[ichunk]; 
+      xfers[ixfer++].tx_buf = (uint64_t) buf_read; 
+      xfers[ixfer++].rx_buf = (uint64_t) ( result + NP_NUM_CHUNK * iaddr + ichunk * NP_SPI_BYTES); 
     }
-
-    xfers[ixfer++].tx_buf = (uint64_t) buf_chunk[ichunk%4]; 
-    xfers[ixfer++].tx_buf = (uint64_t) buf_read; 
-    xfers[ixfer++].rx_buf = (uint64_t) ( result + ichunk * NP_SPI_BYTES); 
   }
- 
-
-
 
 }
 
-
-// we can do up to 511 ioctl's at a time
+// we can do up to 511 ioctl's at a time. We will use 2 xfers to set the readout mode and the channel 
 // that means the maximum number of addresses at a time with half duplex is 39 (156 chunks)
-#define MAX_CHUNKS 39 
 int nuphase_read_raw(nuphase_dev_t *d, uint8_t channel, uint8_t start, uint8_t finish, uint8_t * data) 
 {
+  const int XFERS_PER_ADDR = 3 * NP_NUM_CHUNK + 1 ;
+  const int MAX_ADDR = (511-2) / XFERS_PER_ADDR; 
 
-  struct spi_ioc_transfer xfers[509]; //the maximum number (507 for chunks, 1 for setting mode, 1 for setting channel) 
+  struct spi_ioc_transfer xfers[509]; //the maximum number (507 for reads, 1 for setting mode, 1 for setting channel) 
   uint8_t naddress = finish - start + 1; 
-  uint8_t leftover = naddress % MAX_CHUNKS; 
-  uint8_t niter = naddress / MAX_CHUNKS + (leftover ? 1 : 0); 
+  uint8_t leftover = naddress % MAX_ADDR; 
+  uint8_t niter = naddress / MAX_ADDR + (leftover ? 1 : 0); 
   uint8_t i; 
   init_xfers(509,xfers); 
 
-  xfers[0].tx_buf = (uint64_t) buf_mode[MODE_WAVEFORMS]; 
+  setup_change_mode(xfers, MODE_WAVEFORMS); 
   xfers[1].tx_buf = (uint64_t) buf_channel[channel]; 
-   
-
   for (i = 0; i< niter; i++)
   {
-    int nchunks = i == niter -1 ? leftover : MAX_CHUNKS; 
-    int nxfers = (i == 0 ? 2 : 0)  + 3 * nchunks + nchunks/4; 
-    loop_over_chunks_half_duplex(xfers+2, nchunks, start + i * MAX_CHUNKS, data + i * MAX_CHUNKS * NP_SPI_BYTES); 
+    int naddr = i == niter -1 ? leftover : MAX_ADDR; 
+    int nxfers = (i == 0 ? 2 : 0)  + 13 * naddr; 
+    loop_over_chunks_half_duplex(xfers+2, naddr, start + i * MAX_ADDR, data + i * MAX_ADDR * NP_NUM_CHUNK* NP_SPI_BYTES); 
     ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), (i == 0 ? xfers : xfers+2) );
   }
-
 
   return 0; 
 }
@@ -212,13 +207,13 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 int nuphase_sw_trigger(nuphase_dev_t * d, unsigned state) 
 {
   uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, state & 0xff };  
-  return write(d->spi_fd, buf, 4); 
+  return write(d->spi_fd, buf, NP_SPI_BYTES); 
 }
 
 int nuphase_calpulse(nuphase_dev_t * d, unsigned state) 
 {
   uint8_t buf[4] = { REG_CALPULSE, 0,0, state & 0xff };  
-  return write(d->spi_fd, buf, 4); 
+  return write(d->spi_fd, buf, NP_SPI_BYTES); 
 }
 
 
