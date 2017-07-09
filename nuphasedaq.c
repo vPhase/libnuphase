@@ -13,6 +13,8 @@
 #define NP_NUM_MODE 4
 #define NP_NUM_REGISTER 16
 
+#define NP_DELAY_USECS 0
+
 
 //register map 
 typedef enum
@@ -106,8 +108,9 @@ static init_xfers(int n, struct spi_ioc_transfer * xfers)
   for (i = 0; i < n; i++)
   {
     xfers[i].len = NP_SPI_BYTES; 
+    xfers[i].cs_change =1; //deactivate cs between transfers
+    xfers[i].delay_usecs = NP_DELAY_USECS; //? 
   }
-
 }
 
 
