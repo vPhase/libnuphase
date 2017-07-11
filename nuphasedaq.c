@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <linux/spi/spidev.h>
+#include <pthread.h> 
 
 #define NP_ADDRESS_MAX 128 
 #define NP_SPI_BYTES  NP_WORD_SIZE
@@ -120,8 +121,12 @@ struct nuphase_dev
   const char * device_name; 
   int spi_fd; 
   int gpio_fd; 
+  int enable_locking; 
+  pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
 }; 
 
+#define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
+#define DONE(d)  if (d->enable_locking) pthread_mutex_unlock(&d->mut);
 
 static int setup_change_mode(struct spi_ioc_transfer * xfer, nuphase_readout_mode_t mode)
 {
@@ -180,6 +185,7 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t channel, uint8_t start, uint8_t f
 
   setup_change_mode(xfers, MODE_WAVEFORMS); 
   xfers[1].tx_buf = (uint64_t) buf_channel[channel]; 
+  USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us
   for (i = 0; i< niter; i++)
   {
     int naddr = i == niter -1 ? leftover : MAX_ADDR; 
@@ -187,6 +193,7 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t channel, uint8_t start, uint8_t f
     loop_over_chunks_half_duplex(xfers+2, naddr, start + i * MAX_ADDR, data + i * MAX_ADDR * NP_NUM_CHUNK* NP_SPI_BYTES); 
     ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), (i == 0 ? xfers : xfers+2) );
   }
+  DONE(d);  
 
   return 0; 
 }
@@ -197,29 +204,41 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 {
 
   struct spi_ioc_transfer xfer[4]; 
-  if (address > NP_ADDRESS_MAX) return 0; 
+  int ret;
+  if (address > NP_ADDRESS_MAX) return -1; 
   init_xfers(4,xfer); 
   setup_change_mode(xfer, MODE_REGISTER); 
   setup_read_register(xfer+1, address,result); 
-  return ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer); 
+  USING(d); 
+  ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer); 
+  DONE(d);
+  return ret; 
 }
 
 
 int nuphase_sw_trigger(nuphase_dev_t * d, unsigned state) 
 {
   uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, state & 0xff };  
-  return write(d->spi_fd, buf, NP_SPI_BYTES); 
+  int ret; 
+  USING(d); 
+  ret = write(d->spi_fd, buf, NP_SPI_BYTES); 
+  DONE(d); 
+  return ret; 
 }
 
 int nuphase_calpulse(nuphase_dev_t * d, unsigned state) 
 {
   uint8_t buf[4] = { REG_CALPULSE, 0,0, state & 0xff };  
-  return write(d->spi_fd, buf, NP_SPI_BYTES); 
+  int ret;
+  USING(d); 
+  ret = write(d->spi_fd, buf, NP_SPI_BYTES); 
+  DONE(d); 
+  return ret;
 }
 
 
 
-nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio)
+nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int locking)
 {
   int fd = open(devicename, O_RDWR); 
   if (fd < 0) return 0; 
@@ -251,6 +270,12 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio)
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
   ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
 
+  dev->enable_locking = locking; 
+
+  if (locking) 
+  {
+    pthread_mutex_init(&dev->mut,0); 
+  }
 
   return dev; 
 }
@@ -275,7 +300,10 @@ int nuphase_version(nuphase_dev_t * d, nuphase_version_t * version)
   setup_read_register(xfers+10, 5, dna_mid); 
   setup_read_register(xfers+13, 6, dna_hi); 
 
+
+  USING(d); 
   ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(16), xfers); 
+  DONE(d); 
 
   //TODO check this logic. not sure endianness is correct
   uint64_t dna_low_big =  dna_low[0] | dna_low[1] << 8 || dna_low[2] << 8;
@@ -290,12 +318,20 @@ int nuphase_version(nuphase_dev_t * d, nuphase_version_t * version)
 int nuphase_close(nuphase_dev_t * d) 
 {
   int ret = 0; 
+  USING(d); 
 
   ret += close(d->spi_fd); 
   d->spi_fd = 0; 
   if (d->gpio_fd)
   {
     ret += 2 * close(d->gpio_fd); 
+  }
+
+  if (d->enable_locking)
+  {
+    pthread_mutex_unlock(&d->mut); 
+    ret += 64* pthread_mutex_destroy(&d->mut); 
+    d->enable_locking = 0; 
   }
 
   free(d); 

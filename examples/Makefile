@@ -1,3 +1,4 @@
+CC=gcc 
 CFLAGS+=-g  -I../
 LDFLAGS+= -L../ -lnuphase
 

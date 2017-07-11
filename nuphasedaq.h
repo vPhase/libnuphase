@@ -16,7 +16,8 @@ typedef uint32_t nuphase_buffer_mask_t;
 
 
 nuphase_dev_t * nuphase_open(const char * spi_device_name, 
-                             const char * gpio_interrupt_device_name); 
+                             const char * gpio_interrupt_device_name,
+                             int lock_access); 
 
 
 int nuphase_close(nuphase_dev_t * d); 

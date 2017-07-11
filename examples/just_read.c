@@ -35,7 +35,7 @@ int main(int nargs, char ** args )
   }
 
 
-  dev =  nuphase_open(args[1],0); //no interrupt for now 
+  dev =  nuphase_open(args[1],0,0); //no interrupt for now and no locking
   nuphase_version(dev, &version); 
   nuphase_sw_trigger(dev,1); 
 
