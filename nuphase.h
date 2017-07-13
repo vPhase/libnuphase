@@ -1,8 +1,9 @@
 #ifndef _nuphase_h
 #define _nuphase_h
 
-/** \file nuphase.h  Include file for working with nuphase data. 
+/** \file nuphase.h 
  *
+ * Include file for working with nuphase data. 
  * Cosmin Deaconu <cozzyd@kicp.uchicago.edu> 
  *
  *
@@ -49,9 +50,9 @@ NP_ERR_BAD_VERSION      = 0xbadbeef  //!< version number not understood
 /**  Trigger types */ 
 typedef enum nuphase_trigger_type 
 {
-  TRIG_RF,    //!< triggered by input wavecforms
-  TRIG_SW,    //!< triggered by software (force trigger)  
-  TRIG_EXT    //!< triggered by external trigger 
+  NP_TRIG_RF,    //!< triggered by input wavecforms
+  NP_TRIG_SW,    //!< triggered by software (force trigger)  
+  NP_TRIG_EXT    //!< triggered by external trigger 
 } nuphase_trig_type_t; 
 
 /** in memory layout of nuphase event headers. 
@@ -89,9 +90,8 @@ typedef struct nuphase_event
 {
   uint64_t event_number;  //!< The event number. Should match event header.  
   uint16_t buffer_length; //!< The buffer length that is actually filled. Also available in event header. 
-  uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //8 channels of the max waveform length. Only the first buffer_length bytes of each are important. 
+  uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. 
 } nuphase_event_t; 
-
 
 
 /** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */

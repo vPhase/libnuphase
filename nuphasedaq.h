@@ -3,8 +3,24 @@
 
 #include "nuphase.h" 
 
+/** \file nuphasedaq.h  
+ *
+ * Include file for talking to the hardware. 
+ * Cosmin Deaconu <cozzyd@kicp.uhicago.edu> 
+ *
+ * This header defines structures, constants, and functions
+ * for working with the phased array hardware. 
+ *
+ * There are 
+ * 
+ *
+ */
 
+
+/** Number of chunks in an address */ 
 #define NP_NUM_CHUNK 4 
+
+/** Number of bytes in a word */
 #define NP_WORD_SIZE 4 
 
 
@@ -113,7 +129,8 @@ int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo);
 int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config); 
 
 
-/* Highest level read function. This will wait for data, read it into the 
+/**
+ * Highest level read function. This will wait for data, read it into the 
  * required number of events, clear the buffer, and increment the event number appropriately 
  *
  * You must pass it a pointer to an array of the maximum number of buffers e.g. 
@@ -138,13 +155,18 @@ int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config);
  *
  * Returns the number of events read. 
  *
- * */ 
+ **/ 
 int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d, 
                                               nuphase_header_t (*headers)[NP_NUM_BUFFER], 
                                               nuphase_event_t  (*events)[NP_NUM_BUFFER]) ; 
 
 
 /** Read a single event, filling header and event, and also clearing the buffer and increment event number. Does not check if there is anyting available in the buffer.  
+ *
+ * @param d the device handle
+ * @param buffer the buffer to read
+ * @param header header to write to 
+ * @param event event to write to 
  * Returns 0 on success.
  * */ 
 int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer, 
