@@ -1,6 +1,7 @@
 #include "nuphasedaq.h" 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -8,11 +9,14 @@
 #include <stdlib.h>
 #include <linux/spi/spidev.h>
 #include <pthread.h> 
+#include <arpa/inet.h> 
 
 #define NP_ADDRESS_MAX 128 
 #define NP_SPI_BYTES  NP_WORD_SIZE
 #define NP_NUM_MODE 4
 #define NP_NUM_REGISTER 16
+#define BUF_MASK 0xf
+#define MAX_PRETRIGGER 8 
 
 #define NP_DELAY_USECS 0
 
@@ -30,13 +34,19 @@ typedef enum
   REG_CHIPID_MID = 0x05,  
   REG_CHIPID_HI = 0x06,  
   REG_CALPULSE=0x2a, //cal pulse
+  REG_CHANNEL_MASK=0x30, 
   REG_READ=0x47, //send data to spi miso 
   REG_FORCE_TRIG=0x40, 
   REG_CHANNEL=0x41, //select channel to read
   REG_MODE=0x42, //readout mode
   REG_RAM_ADDR=0x45, //ram address
   REG_CHUNK=0x49, //which 32-bit chunk 
-  REG_BUFFER=0x4e 
+  REG_PRETRIGGER=0x4c, 
+  REG_CLEAR=0x4d, //clear buffers 
+  REG_BUFFER=0x4e,
+  REG_TRIGGER_MASK =0x50, 
+  REG_THRESHOLDS= 0x56 // add the threshold to this to get the right register
+
 } nuphase_register_t; 
 
 
@@ -51,7 +61,6 @@ typedef enum
 
 
 
-
 // all possible buffers we might batch
 static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
 static uint8_t buf_set_read_reg[NP_NUM_REGISTER][NP_SPI_BYTES];
@@ -60,7 +69,7 @@ static uint8_t buf_buffer[NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
-
+static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
 
 static void fillBuffers() __attribute__((constructor)); //this will fill them
 
@@ -114,11 +123,19 @@ void fillBuffers()
     buf_chunk[i][0]=REG_CHUNK; 
     buf_chunk[i][3] = i; 
   }
+
+  memset(buf_clear,0,sizeof(buf_clear)); 
+
+  for (i = 0; i < (1 << NP_NUM_BUFFER); i++)
+  {
+    buf_chunk[i][0]=REG_CLEAR; 
+    buf_chunk[i][3]=i;  
+  }
 }
 
 
 
-static init_xfers(int n, struct spi_ioc_transfer * xfers)
+static void init_xfers(int n, struct spi_ioc_transfer * xfers)
 {
   int i; 
 
@@ -151,6 +168,7 @@ struct nuphase_dev
 static int setup_change_mode(struct spi_ioc_transfer * xfer, nuphase_readout_mode_t mode)
 {
   xfer->tx_buf = (uint64_t) buf_mode[mode]; 
+  return 0; 
 }
 
 
@@ -166,55 +184,93 @@ static int setup_read_register(struct spi_ioc_transfer * xfers, uint8_t address,
   return 0; 
 }
 
+/* to simplify batching complicated transfers,
+ * we use this simple data structure. 
+ *
+ */ 
+struct xfer_buffer 
+{
+  struct spi_ioc_transfer spi[511]; 
+  int nused; 
+  int fd; 
+};
+
+static void xfer_buffer_init(struct xfer_buffer * b, int fd) 
+{
+  init_xfers(511,b->spi); 
+  b->nused = 0; 
+  b->fd = fd; 
+}
+
+
+static int xfer_buffer_send(struct xfer_buffer *b)
+{
+  int success = ioctl(b->fd, SPI_IOC_MESSAGE(b->nused), b->spi); 
+  if (!success) 
+  {
+    fprintf(stderr,"IOCTL failed!\n"); 
+    return -1; 
+  }
+  b->nused = 0; 
+
+  return 0; 
+}
+
+// this will send if full!  
+static int xfer_buffer_append(struct xfer_buffer * b, const uint8_t * txbuf, const uint8_t * rxbuf) 
+{
+  //check if full 
+  if (b->nused == 511) 
+  {
+    if (xfer_buffer_send(b))
+    {
+      return -1; 
+    }
+  }
+
+  b->spi[b->nused].tx_buf = (uint64_t) txbuf; 
+  b->spi[b->nused].rx_buf = (uint64_t) rxbuf; 
+  b->nused++; 
+  return 0; 
+}
+
 
 /* this will use up 13*naddr xfers.  MUST start on chunk 0 */ 
-static int loop_over_chunks_half_duplex(struct spi_ioc_transfer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
+static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
 {
 
   int iaddr; 
   int ichunk; 
-  int ixfer = 0; 
 
   for (iaddr  =0; iaddr < naddr; iaddr++) 
   {
-    xfers[ixfer++].tx_buf = (uint64_t) buf_ram_addr[ start_address + iaddr]; 
+    xfer_buffer_append(xfers, buf_ram_addr[start_address + iaddr], 0); 
 
     for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
     {
-      xfers[ixfer++].tx_buf = (uint64_t) buf_chunk[ichunk]; 
-      xfers[ixfer++].tx_buf = (uint64_t) buf_read; 
-      xfers[ixfer++].rx_buf = (uint64_t) ( result + NP_NUM_CHUNK * iaddr + ichunk * NP_SPI_BYTES); 
+      xfer_buffer_append(xfers, buf_chunk[ichunk], 0); 
+      xfer_buffer_append(xfers, buf_read, 0); 
+      xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK * iaddr + ichunk * NP_SPI_BYTES); 
     }
   }
 
+  return 0; 
 }
 
-// we can do up to 511 ioctl's at a time. We will use 3 xfers to set the readout mode, buffer and channel 
-// that means the maximum number of addresses at a time with half duplex is 39 (156 chunks)
 int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start, uint8_t finish, uint8_t * data) 
 {
-  const int XFERS_PER_ADDR = 3 * NP_NUM_CHUNK + 1 ;
-  const int MAX_ADDR = (511-3) / XFERS_PER_ADDR; 
-  const int NXFERS = MAX_ADDR * XFERS_PER_ADDR + 3; 
 
-  struct spi_ioc_transfer xfers[NXFERS]; //the maximum number (507 for reads, 1 for setting mode, 1 for setting channel, 1 for setting  buffer) 
+  struct xfer_buffer xfers; 
+  xfer_buffer_init(&xfers, d->spi_fd); 
   uint8_t naddress = finish - start + 1; 
-  uint8_t leftover = naddress % MAX_ADDR; 
-  uint8_t niter = naddress / MAX_ADDR + (leftover ? 1 : 0); 
-  uint8_t i; 
-  init_xfers(NXFERS,xfers); 
 
-  setup_change_mode(xfers, MODE_WAVEFORMS); 
-  xfers[1].tx_buf = (uint64_t) buf_buffer[buffer]; 
-  xfers[2].tx_buf = (uint64_t) buf_channel[channel]; 
+  //TODO should probably add some error checks and stuff... 
+  xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS], 0); 
+  xfer_buffer_append(&xfers, buf_buffer[buffer], 0); 
+  xfer_buffer_append(&xfers, buf_channel[channel], 0); 
   USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us
-  for (i = 0; i< niter; i++)
-  {
-    int naddr = i == niter -1 ? leftover : MAX_ADDR; 
-    int nxfers = (i == 0 ? 3 : 0)  + XFERS_PER_ADDR * naddr; 
-    loop_over_chunks_half_duplex(xfers+3, naddr, start + i * MAX_ADDR, data + i * MAX_ADDR * NP_NUM_CHUNK* NP_SPI_BYTES); 
-    ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), (i == 0 ? xfers : xfers+3) );
-  }
+  loop_over_chunks_half_duplex(&xfers, naddress, start, data); 
+  xfer_buffer_send(&xfers); //pick up the stragglers. 
   DONE(d);  
 
   return 0; 
@@ -260,14 +316,28 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state)
 
 
 
-nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int locking)
+nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
+                             const nuphase_config_t * c,  int locking)
 {
-  int fd = open(devicename, O_RDWR); 
-  nuphase_config_t cfg; 
-  if (fd < 0) return 0; 
+  int locked,fd; 
+  nuphase_dev_t * dev; 
 
 
-  nuphase_dev_t * dev = malloc(sizeof(nuphase_dev_t)); 
+  fd = open(devicename, O_RDWR); 
+  if (fd < 0) 
+  {
+    fprintf(stderr,"Could not open %s\n", devicename); 
+    return 0; 
+  }
+
+  locked = flock(fd,LOCK_EX | LOCK_NB); 
+  if (locked < 0) 
+  {
+    fprintf(stderr,"Could not get exclusive access to %s\n", devicename); 
+    return 0; 
+  }
+
+  dev = malloc(sizeof(nuphase_dev_t)); 
   dev->device_name = devicename; 
   dev->spi_fd =fd;
 
@@ -287,14 +357,17 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int loc
   }
 
 
+  //Configure the SPI protocol 
   uint32_t speed = 10000000; //10 MHz 
   uint8_t mode = SPI_MODE_0; 
-
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
   ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
 
-  //send the default config 
-  nuphase_config_init(&cfg); 
+
+  //configuration 
+  if (c) dev->cfg = *c; 
+  else nuphase_config_init(&dev->cfg); 
+  nuphase_configure(dev, &dev->cfg); 
 
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->event_number = ((uint64_t)time(0)) << 32; 
@@ -314,6 +387,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int loc
 void nuphase_set_event_number(nuphase_dev_t * d, uint64_t number)
 {
   d->event_number = number; 
+  //TODO this will eventually set it on the board 
 }
 
 void nuphase_set_buffer_length(nuphase_dev_t * d, uint16_t length)
@@ -323,6 +397,7 @@ void nuphase_set_buffer_length(nuphase_dev_t * d, uint16_t length)
 
 uint64_t nuphase_get_event_number(const nuphase_dev_t * d) 
 {
+  // this will be checked with the board on every read
   return d->event_number; 
 }
 
@@ -356,11 +431,16 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(16), xfers); 
   DONE(d); 
 
+
   //TODO check this logic. not sure endianness is correct
   uint64_t dna_low_big =  dna_low[0] | dna_low[1] << 8 || dna_low[2] << 8;
   uint64_t dna_mid_big =  dna_mid[0] | dna_mid[1] << 8 || dna_mid[2] << 8;
   uint64_t dna_hi_big =  dna_hi[0] | dna_hi[1] << 8 ;
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
+
+  //ver and date are going to be the wrong endianness, I think 
+  info->ver = ntohl(info->ver); 
+  info->date = ntohl(info->date); 
 
   return ret; 
 }
@@ -370,21 +450,20 @@ int nuphase_close(nuphase_dev_t * d)
 {
   int ret = 0; 
   USING(d); 
-
-  ret += close(d->spi_fd); 
-  d->spi_fd = 0; 
-  if (d->gpio_fd)
-  {
-    ret += 2 * close(d->gpio_fd); 
-  }
-
   if (d->enable_locking)
   {
+    //this should be allowed? 
     pthread_mutex_unlock(&d->mut); 
     ret += 64* pthread_mutex_destroy(&d->mut); 
     d->enable_locking = 0; 
   }
 
+  ret += flock(d->spi_fd, LOCK_UN); 
+  ret += 4*close(d->spi_fd); 
+  if (d->gpio_fd)
+  {
+    ret += 8 * close(d->gpio_fd); 
+  }
   free(d); 
   return ret; 
 }
@@ -430,18 +509,110 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d)
   uint8_t result; 
   nuphase_buffer_mask_t mask; 
   nuphase_read_register(d, REG_STATUS, &result); 
-  mask  = result &  0xf; // only keep lower 4 bits. who knows what's in the other bits? 
+  mask  = result &  BUF_MASK; // only keep lower 4 bits. who knows what's in the other bits? 
   return mask; 
 }
 
+/* This just sets defaults */ 
+void nuphase_config_init(nuphase_config_t * c) 
+{
+  int i;
+  c->channel_mask = 0xff; 
+  c->pretrigger = 1; //?? 
+  c->trigger_mask = 0xfff; 
+
+  for (i = 0; i < NP_NUM_BEAMS; i++)
+    c->trigger_thresholds[i] = 0xfffff;  //TODO make this more sensible by default 
+}
 
 
 int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c) 
 {
-  //TODO 
+  int written; 
+  int ret = 0; 
+  
+  USING(d); 
+  if (c->pretrigger != d->cfg.pretrigger)
+  {
+    uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, 0, c->pretrigger}; 
+    written = write(d->spi_fd, pretrigger_buf, NP_SPI_BYTES); 
+    if (written == NP_SPI_BYTES) 
+    {
+      d->cfg.pretrigger = c->pretrigger; 
+    }
+    else
+    {
+      ret = -1; //don't try to continue if we fail . 
+      goto configure_end; 
+    }
+  }
+
+  if (c->channel_mask!= d->cfg.channel_mask)
+  {
+    uint8_t channel_mask_buf[]= { REG_PRETRIGGER, 0, 0, c->channel_mask}; 
+    written = write(d->spi_fd, channel_mask_buf, NP_SPI_BYTES); 
+    if (written == NP_SPI_BYTES) 
+    {
+      d->cfg.channel_mask = c->channel_mask; 
+    }
+    else
+    {
+      ret = -1; 
+      goto configure_end; 
+    }
+  }
+
+  if (c->trigger_mask != d->cfg.trigger_mask)
+  {
+    //TODO check the byte order
+    uint8_t trigger_mask_buf[]= { REG_TRIGGER_MASK, 0, (c->trigger_mask >> 8) & 0xff, c->trigger_mask & 0xff}; 
+    written = write(d->spi_fd, trigger_mask_buf, NP_SPI_BYTES); 
+    if (written == NP_SPI_BYTES) 
+    {
+      d->cfg.trigger_mask = c->trigger_mask; 
+    }
+    else
+    {
+      ret = -1; 
+      goto configure_end; 
+    }
+  }
+
+  if (memcmp(c->trigger_thresholds, d->cfg.trigger_thresholds, sizeof(c->trigger_thresholds)))
+  {
+    uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+    struct spi_ioc_transfer xfer[NP_NUM_BEAMS]; 
+    init_xfers(NP_NUM_BEAMS, xfer); 
+    int i; 
+    for (i = 0; i < NP_NUM_BEAMS; i++)
+    {
+      thresholds_buf[i][0]= REG_THRESHOLDS+i ;
+      thresholds_buf[i][1]= (c->trigger_thresholds[i] >> 16 ) & 0xf;
+      thresholds_buf[i][2]= ( c->trigger_thresholds[i] >> 8) & 0xff; 
+      thresholds_buf[i][3]= c->trigger_thresholds[i] & 0xff;
+      xfer[i].tx_buf =  (uint64_t) &thresholds_buf[i][0]; 
+    }
+    if(!ioctl(d->spi_fd, SPI_IOC_MESSAGE(NP_NUM_BEAMS), xfer))
+    {
+      //success! 
+      memcpy(d->cfg.trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
+    }
+    else 
+    {
+      ret =-1; 
+      goto configure_end; 
+    }
+  }
+
+  configure_end: 
+
+  DONE(d); 
+  return ret; 
 }
 
 
+
+//indirection! 
 int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d, 
                                       nuphase_header_t (*headers)[NP_NUM_BUFFER], 
                                       nuphase_event_t  (*events)[NP_NUM_BUFFER])  
@@ -451,23 +622,87 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
   if (mask) 
   {
     int ret; 
-    ret = nuphase_read_multiple(d,mask,&(*headers)[0], &(*events)[0]); 
+    ret = nuphase_read_multiple_array(d,mask,&(*headers)[0], &(*events)[0]); 
     if (!ret) return __builtin_popcount(mask); 
     else return -1; 
   }
   return 0; 
 }
 
+//yay more indirection!
 int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer, nuphase_header_t * header, nuphase_event_t * event)
 {
   nuphase_buffer_mask_t mask = 1 << buffer; 
-  return nuphase_read_multiple(d,mask,header, event); 
+  return nuphase_read_multiple_ptr(d,mask,&header, &event); 
 
 }
 
-
-int nuphase_read_multiple(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nuphase_header_t * headers,  nuphase_event_t * events) 
+//woohoo, even more indirection. 
+int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nuphase_header_t * headers,  nuphase_event_t * events) 
 {
+  nuphase_event_t * ev_ptr_array[NP_NUM_BUFFER]; 
+  nuphase_header_t * hd_ptr_array[NP_NUM_BUFFER]; 
+  int i; 
 
-  //TODO
+  for ( i = 0; i < __builtin_popcount(mask); i++)
+  {
+    ev_ptr_array[i] = &events[i]; 
+    hd_ptr_array[i] = &headers[i]; 
+  }
+
+  return nuphase_read_multiple_ptr(d,mask,hd_ptr_array, ev_ptr_array); 
+}
+
+
+int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nuphase_header_t ** hd, nuphase_event_t ** ev)
+{
+  int ibuf,ichan;
+  int iout = 0; 
+  int ret; 
+  struct xfer_buffer xfers; 
+  struct timespec now; 
+  clock_gettime(CLOCK_REALTIME, &now); 
+  xfer_buffer_init(&xfers, d->spi_fd); 
+  USING(d); //hold the lock for the duration
+  for (ibuf = 0; ibuf < NP_NUM_BUFFER; ibuf++)
+  {
+    if ( (mask & (1 << ibuf)) == 0)
+      continue; 
+
+    //TODO should probably add some error checks and stuff... 
+    //set the buffer 
+    ret+=xfer_buffer_append(&xfers, buf_buffer[ibuf],0); 
+
+    //TODO read metadata once that is fully implemented 
+    
+    hd[ibuf]->buffer_mask = mask; 
+    hd[ibuf]->buffer_length = d->buffer_length; 
+    hd[ibuf]->event_number = d->event_number; //this will be checked against hardware number! 
+    ev[ibuf]->event_number = d->event_number; 
+    ev[ibuf]->buffer_length = d->buffer_length; 
+
+    ret+=xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS],0); 
+    for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
+    {
+      ret+=xfer_buffer_append(&xfers, buf_channel[ichan],0); 
+      loop_over_chunks_half_duplex(&xfers, hd[ibuf]->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[ibuf]->data[ichan]); 
+    }
+    ret+=xfer_buffer_append(&xfers, buf_clear[1 << ibuf],0); 
+    ret+=xfer_buffer_send(&xfers); //flush so we can clear the buffer immediately 
+
+    iout++; 
+  }
+  DONE(d); 
+
+  return ret; 
+}
+
+
+int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask) 
+{
+  int ret; 
+  USING(d); 
+  ret = write(d->spi_fd, buf_clear[mask & BUF_MASK], NP_SPI_BYTES); //TODO check if this is really the right interface 
+  DONE(d); 
+  return ret == NP_SPI_BYTES ? 0 : -1; 
 }

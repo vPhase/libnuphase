@@ -17,6 +17,30 @@ typedef struct nuphase_dev nuphase_dev_t;
 /** a bitmask indicating which buffers are available */ 
 typedef uint8_t nuphase_buffer_mask_t;
 
+/** Configuration options, sent to fpga  with configure. 
+ * Only values different from previously sent config will be sent
+ * Use nuphase_config_init to fill with default values if you want. 
+ */ 
+typedef struct nuphase_config
+{
+ uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
+ uint16_t trigger_mask;                     //!< Which triggers to use, default is all (0xffffff) 
+ uint8_t  channel_mask;                     //!< Which channels to use, default is all (0xff)
+ uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 85 samples)  (3 bits);  
+} nuphase_config_t; 
+
+/** Fill the config with default options */
+void nuphase_config_init(nuphase_config_t * c); 
+
+
+/** Firmware info retrieved from board */ 
+typedef struct nuphase_fwinfo
+{
+  uint32_t ver;  //!< firmware version
+  uint32_t date; //!< firmware date
+  uint64_t dna;  //!< board dna 
+} nuphase_fwinfo_t; 
+
 
 /** \brief Open a nuphase phased array board and initializes it. 
  *
@@ -34,23 +58,25 @@ typedef uint8_t nuphase_buffer_mask_t;
  * buffer length is set to the default amount (624 samples) and the event number is set to unixtime << 32. They can be
  * set to something better using nuphase_set_buffer_length and nuphase_set_event_number.
  *
- * The dfeault nuphase_config_t is also sent on startup. Changes can be made using nuphase_configure. 
+ * The default nuphase_config_t is also sent on startup. Changes can be made using nuphase_configure. 
+ *
+ * The access to the SPI file descriptor is locked when opening, so only one process can hold it. 
  *
  * If that turns out to be too slow, I guess we can write a kernel driver. 
  *
  * @param spi_device_name The SPI device (likely something like  /sys/bus/spi/devices/spi1.0 )
  * @param gpio_interrupt_device_name The GPIO device acting as an interrupt (e.g. /dev/uio0). This is purely optional, if not defined, we will busy wait. 
+ * @param cfg          If non-zero, this config is used instead of the default initial one. 
  * @param lock_access  If 1, a mutex will be initialized that will control concurrent access to this device from multiple threads
- * 
+ * @returns a pointer to the file descriptor, or 0 if something went wrong. 
  */
-
-nuphase_dev_t * nuphase_open(const char * spi_device_name, const char *
-    gpio_interrupt_device_name, int lock_access); 
-
+nuphase_dev_t * nuphase_open(const char * spi_device_name, 
+                             const char * gpio_interrupt_device_name,
+                             const nuphase_config_t * cfg,
+                             int lock_access); 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
-
 
 /**Set the event number for the device */
 void nuphase_set_event_number(nuphase_dev_t * d, uint64_t number) ;
@@ -81,7 +107,9 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d);
 /** Retrieve the firmware info */
 int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo); 
 
-/** Sends config to the board*/ 
+/** Sends config to the board. The config is stuff like pretrigger threshold, 
+ * Note that it's possible this may not take effect on the immediate next buffer. 
+ * */ 
 int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config); 
 
 
@@ -123,10 +151,21 @@ int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer,
                         nuphase_header_t * header, nuphase_event_t * event);
 
 
-/** Reads buffers specified by mask. An event and header  must exist for each mask. ( Clears each buffer after reading and increments event numbers appropriately.
- * Returns 0 on success. 
+/** Reads buffers specified by mask. An event and header  must exist for each
+ * buffer in the array pointed to by header_arr and event_arr ( Clears each buffer after reading and increments event numbers
+ * appropriately).  Returns 0 on success. 
+ *
  **/
-int nuphase_read_multiple(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nuphase_header_t *header_arr,  nuphase_event_t * event_arr); 
+int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, 
+                                nuphase_header_t *header_arr,  nuphase_event_t * event_arr); 
+ 
+/** Reads buffers specified by mask. An pointer to event and header  must exist for each
+ * buffer in the array pointed to by header_arr and event_arr ( Clears each
+ * buffer after reading and increments event numbers appropriately).  Returns 0
+ * on success. 
+ **/
+int nuphase_read_multiple_ptr(nuphase_dev_t *d, nuphase_buffer_mask_t mask, 
+                              nuphase_header_t **header_ptr_arr,  nuphase_event_t ** event_ptr_arr); 
 
 
 
@@ -138,8 +177,8 @@ int nuphase_read_multiple(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nuphase_
 int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start_ram, uint8_t end_ram, uint8_t * data); 
 
 
-/** Clear the specified buffer. Returns 0 on success. */ 
-int nuphase_clear_buffer(nuphase_dev_t *d, uint8_t buffer); 
+/** Clear the specified buffers. Returns 0 on success. */ 
+int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask); 
 
 
 /** 
