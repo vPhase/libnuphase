@@ -6,6 +6,7 @@
 /** \file nuphasedaq.h  
  *
  * Include file for talking to the hardware. 
+ *
  * Cosmin Deaconu <cozzyd@kicp.uhicago.edu> 
  *
  * This header defines structures, constants, and functions
@@ -113,8 +114,15 @@ int nuphase_sw_trigger(nuphase_dev_t * d);
 /** Change the state of the calpulser */ 
 int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ; 
 
-/** Waits for data to be available (or might be interrupted by a signal). Returns 
- * the buffer mask at the end (if it's 0, it means nothing is ready to read */
+/** Waits for data to be available (or might be interrupted by a signal).
+ * 
+ * If a hardware interrupt is available, we will wait for that. Otherwise we
+ * will poll. 
+ *
+ * Returns the buffer mask at the end (if it's 0, it means nothing is ready to
+ * read.
+ **/
+
 nuphase_buffer_mask_t nuphase_wait(nuphase_dev_t *d); 
 
 /** Checks to see which buffers are ready to be read */ 
