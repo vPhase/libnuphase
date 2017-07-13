@@ -32,6 +32,8 @@
 /** The maximum length of a waveform */ 
 #define NP_MAX_WAVEFORM_LENGTH 2048  
 
+/** The number of trigger beams available */ 
+#define NP_NUM_BEAMS 16 
 
 /** Error codes for read/write */ 
 typedef enum 
@@ -43,26 +45,6 @@ NP_ERR_BAD_VERSION      = 0xbadbeef  //!< version number not understood
 } np_io_error_t; 
 
 
-/** Configuration options, sent to fpga . 
- * Use nuphase_config_init to fill with default values if you want. 
- */ 
-typedef struct nuphase_config
-{
- uint8_t  channel_mask;   //!< Which channels to use, default is all (0xff)
- uint8_t  pretrigger:3;   //!<  Amount of pre-trigger (multiple of 85 samples)  (3 bits);  
-} nuphase_config_t; 
-
-/** Fill the config with default options */
-void nuphase_config_init(nuphase_config_t * c); 
-
-
-/** Firmware info retrieved from board */ 
-typedef struct nuphase_fwinfo
-{
-  uint32_t ver;  //!< firmware version
-  uint32_t date; //!< firmware date
-  uint64_t dna;  //!< board dna 
-} nuphase_fwinfo_t; 
  
 /**  Trigger types */ 
 typedef enum nuphase_trigger_type 
@@ -82,35 +64,21 @@ typedef enum nuphase_trigger_type
  */
 typedef struct nuphase_header 
 {
-  uint64_t event_number;           //!< the event number assigned to this event. Will match the event body. 
-  uint16_t buffer_length;          //!< the buffer length. Stored both here and in the event. 
-  uint16_t pretrigger_samples;     //!< Number of samples that are pretrigger
-  uint32_t readout_time;           //!< CPU time of readout, seconds
-  uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
-  uint32_t trig_time;              //!< ??? Will this be filled ?
-  uint16_t deadtime;               //!< ??? Will we have this available? If so, this will be a fraction
-  nuphase_trig_type_t trig_type:8; //!< The trigger type? (how do we know this? ) 
-  uint8_t buffer_number;           //!< the buffer number (do we need this?) 
-  uint8_t trigger_beam;            //!< The beam that triggered ? (how do we know this?) 
-  unsigned channel_mask:NP_NUM_CHAN;  //!< The enabled channels  
-  unsigned buffer_mask:NP_NUM_BUFFER; //!< The buffer mask at time of read out (do we want this?)   
+  uint64_t event_number;               //!< the event number assigned to this event. Will match the event body. 
+  uint16_t buffer_length;              //!< the buffer length. Stored both here and in the event. 
+  uint16_t pretrigger_samples;         //!< Number of samples that are pretrigger
+  uint32_t readout_time;               //!< CPU time of readout, seconds
+  uint32_t readout_time_ns;            //!< CPU time of readout, nanoseconds 
+  uint64_t trig_time;                  //!< Board trigger time
+  uint16_t triggered_beams;            //!< The beams that triggered 
+  uint16_t beam_mask;                  //!< The enabled beams
+  uint32_t beam_power[NP_NUM_CHAN];    //!< The power in each beam at the trigger time
+  nuphase_trig_type_t trig_type;       //!< The trigger type? 
+  uint16_t deadtime;                   //!< ??? Will we have this available? If so, this will be a fraction
+  uint8_t buffer_number;               //!< the buffer number (do we need this?) 
+  uint8_t channel_mask;                //!< The enabled channels  
+  uint8_t buffer_mask;                 //!< The buffer mask at time of read out (do we want this?)   
 } nuphase_header_t; 
-
-
-
-/** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
-int nuphase_header_write(FILE * f, const nuphase_header_t * h); 
-
-/** write this header to compressed file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
-int nuphase_header_gzwrite(gzFile f, const nuphase_header_t * h); 
-
-/** read this header from file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */ 
-
-int nuphase_header_read(FILE * f, nuphase_header_t * h); 
-
-/** read this header from compressed file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */ 
-int nuphase_header_gzread(gzFile  f, nuphase_header_t * h); 
-
 
 /**nuphase event body.
  * Holds waveforms. Note that although the buffer length may vary, in memory
@@ -124,6 +92,19 @@ typedef struct nuphase_event
   uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //8 channels of the max waveform length. Only the first buffer_length bytes of each are important. 
 } nuphase_event_t; 
 
+
+
+/** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
+int nuphase_header_write(FILE * f, const nuphase_header_t * h); 
+
+/** write this header to compressed file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
+int nuphase_header_gzwrite(gzFile f, const nuphase_header_t * h); 
+
+/** read this header from file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */ 
+int nuphase_header_read(FILE * f, nuphase_header_t * h); 
+
+/** read this header from compressed file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */ 
+int nuphase_header_gzread(gzFile  f, nuphase_header_t * h); 
 
 /** Write the event body to a file. Returns 0 on success. The number of bytes written is not sizeof(nuphase_event_t). */ 
 int nuphase_event_write(FILE * f, const nuphase_event_t * ev); 

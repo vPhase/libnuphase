@@ -20,7 +20,7 @@ static uint16_t stupid_fletcher16_append(int N, const void * vbuf, uint16_t appe
   uint16_t sum2 = append >> 8;; 
   uint8_t * buf = (uint8_t*) vbuf; 
 
-  for (i < 0; i < N; i++)
+  for (i = 0; i < N; i++)
   {
     sum1 =  (sum1 +buf[i]) % 255; 
     sum2 += (sum1 + sum2) % 255;;
@@ -34,14 +34,6 @@ static uint16_t stupid_fletcher16(int N, const void * buf)
   return stupid_fletcher16_append(N, buf, 0); 
 }
 
-
-
-/* This just sets defaults */ 
-void nuphase_config_init(nuphase_config_t * c) 
-{
-  c->channel_mask = 0xff; 
-  c->pretrigger = 1; //?? 
-}
 
 
 
@@ -115,7 +107,7 @@ static int nuphase_header_generic_write(struct generic_file gf, const nuphase_he
 
   written = generic_write(gf, sizeof(nuphase_header_t), h); 
   
-  if (written != sizeof(nuphase_header_t), h)
+  if (written != sizeof(nuphase_header_t))
   {
     return NP_ERR_NOT_ENOUGH_BYTES; 
   }
@@ -186,6 +178,17 @@ int nuphase_header_gzwrite(gzFile f, const nuphase_header_t * h)
   return nuphase_header_generic_write(gf, h); 
 }
 
+int nuphase_header_read(FILE * f, nuphase_header_t * h) 
+{
+  struct generic_file gf = { .type = STDIO, .handle.f = f }; 
+  return nuphase_header_generic_read(gf, h); 
+}
+
+int nuphase_header_gzread(gzFile f, nuphase_header_t * h) 
+{
+  struct generic_file gf = { .type = ZLIB, .handle.gzf = f }; 
+  return nuphase_header_generic_read(gf, h); 
+}
 
 /* The on-disk format is just packet_start followed by the newest version of the
  * the event struct. Note that we only write (and compute the checksum for) buffer length bytes for each event. 
@@ -322,6 +325,18 @@ int nuphase_event_gzwrite(gzFile f, const nuphase_event_t * ev)
 {
   struct generic_file gf=  { .type = ZLIB, .handle.gzf = f }; 
   return nuphase_event_generic_write(gf, ev); 
+}
+
+int nuphase_event_read(FILE * f, nuphase_event_t * ev) 
+{
+  struct generic_file gf=  { .type = STDIO, .handle.f = f }; 
+  return nuphase_event_generic_read(gf, ev); 
+}
+
+int nuphase_event_gzread(gzFile f, nuphase_event_t * ev) 
+{
+  struct generic_file gf=  { .type = ZLIB, .handle.gzf = f }; 
+  return nuphase_event_generic_read(gf, ev); 
 }
 
 
