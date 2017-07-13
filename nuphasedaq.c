@@ -18,6 +18,8 @@
 #define BUF_MASK 0xf
 #define MAX_PRETRIGGER 8 
 
+#define SPI_CAST  (uintptr_t) 
+
 #define NP_DELAY_USECS 0
 
 #define POLL_USLEEP 1000 
@@ -167,7 +169,7 @@ struct nuphase_dev
 
 static int setup_change_mode(struct spi_ioc_transfer * xfer, nuphase_readout_mode_t mode)
 {
-  xfer->tx_buf = (uint64_t) buf_mode[mode]; 
+  xfer->tx_buf = SPI_CAST  buf_mode[mode]; 
   return 0; 
 }
 
@@ -177,9 +179,9 @@ static int setup_change_mode(struct spi_ioc_transfer * xfer, nuphase_readout_mod
 static int setup_read_register(struct spi_ioc_transfer * xfers, uint8_t address, uint8_t *result)
 {
 
-  xfers[0].tx_buf = (uint64_t)  buf_set_read_reg[address]; 
-  xfers[1].tx_buf = (uint64_t)  buf_read; 
-  xfers[2].rx_buf = (uint64_t)  result; 
+  xfers[0].tx_buf = SPI_CAST  buf_set_read_reg[address]; 
+  xfers[1].tx_buf = SPI_CAST  buf_read; 
+  xfers[2].rx_buf = SPI_CAST  result; 
 
   return 0; 
 }
@@ -228,8 +230,8 @@ static int xfer_buffer_append(struct xfer_buffer * b, const uint8_t * txbuf, con
     }
   }
 
-  b->spi[b->nused].tx_buf = (uint64_t) txbuf; 
-  b->spi[b->nused].rx_buf = (uint64_t) rxbuf; 
+  b->spi[b->nused].tx_buf = SPI_CAST txbuf; 
+  b->spi[b->nused].rx_buf = SPI_CAST rxbuf; 
   b->nused++; 
   return 0; 
 }
@@ -590,7 +592,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c)
       thresholds_buf[i][1]= (c->trigger_thresholds[i] >> 16 ) & 0xf;
       thresholds_buf[i][2]= ( c->trigger_thresholds[i] >> 8) & 0xff; 
       thresholds_buf[i][3]= c->trigger_thresholds[i] & 0xff;
-      xfer[i].tx_buf =  (uint64_t) &thresholds_buf[i][0]; 
+      xfer[i].tx_buf =  SPI_CAST &thresholds_buf[i][0]; 
     }
     if(!ioctl(d->spi_fd, SPI_IOC_MESSAGE(NP_NUM_BEAMS), xfer))
     {
