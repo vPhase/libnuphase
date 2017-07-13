@@ -16,20 +16,27 @@
 
 #define NP_DELAY_USECS 0
 
+#define POLL_USLEEP 1000 
+
 
 //register map 
 typedef enum
 {
+  REG_SET_READ_REG=0x00, 
   REG_FIRMWARE_VER=0x01, 
   REG_FIRMWARE_DATE=0x02, 
-  REG_SET_READ_REG=0x00, 
+  REG_STATUS = 0x03, 
+  REG_CHIPID_LOW = 0x04,  
+  REG_CHIPID_MID = 0x05,  
+  REG_CHIPID_HI = 0x06,  
+  REG_CALPULSE=0x2a, //cal pulse
   REG_READ=0x47, //send data to spi miso 
   REG_FORCE_TRIG=0x40, 
   REG_CHANNEL=0x41, //select channel to read
-  REG_CHUNK=0x49, //which 32-bit chunk 
-  REG_RAM_ADDR=0x45, //ram address
   REG_MODE=0x42, //readout mode
-  REG_CALPULSE=0x2a //cal pulse
+  REG_RAM_ADDR=0x45, //ram address
+  REG_CHUNK=0x49, //which 32-bit chunk 
+  REG_BUFFER=0x4e 
 } nuphase_register_t; 
 
 
@@ -49,6 +56,7 @@ typedef enum
 static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
 static uint8_t buf_set_read_reg[NP_NUM_REGISTER][NP_SPI_BYTES];
 static uint8_t buf_channel[NP_NUM_CHAN][NP_SPI_BYTES];
+static uint8_t buf_buffer[NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
@@ -82,6 +90,15 @@ void fillBuffers()
     buf_channel[i][0] = REG_CHANNEL; 
     buf_channel[i][3] = i; 
   }
+
+  memset(buf_buffer,0,sizeof(buf_buffer)); 
+  for (i = 0; i < NP_NUM_BUFFER; i++) 
+  {
+    buf_buffer[i][0] = REG_BUFFER; 
+    buf_buffer[i][3] = i; 
+  }
+
+
 
   memset(buf_ram_addr,0,sizeof(buf_ram_addr)); 
   for (i = 0; i < NP_ADDRESS_MAX; i++) 
@@ -122,6 +139,9 @@ struct nuphase_dev
   int spi_fd; 
   int gpio_fd; 
   int enable_locking; 
+  uint64_t event_number; 
+  nuphase_config_t cfg; 
+  uint16_t buffer_length; 
   pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
 }; 
 
@@ -169,29 +189,31 @@ static int loop_over_chunks_half_duplex(struct spi_ioc_transfer * xfers, uint8_t
 
 }
 
-// we can do up to 511 ioctl's at a time. We will use 2 xfers to set the readout mode and the channel 
+// we can do up to 511 ioctl's at a time. We will use 3 xfers to set the readout mode, buffer and channel 
 // that means the maximum number of addresses at a time with half duplex is 39 (156 chunks)
-int nuphase_read_raw(nuphase_dev_t *d, uint8_t channel, uint8_t start, uint8_t finish, uint8_t * data) 
+int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start, uint8_t finish, uint8_t * data) 
 {
   const int XFERS_PER_ADDR = 3 * NP_NUM_CHUNK + 1 ;
-  const int MAX_ADDR = (511-2) / XFERS_PER_ADDR; 
+  const int MAX_ADDR = (511-3) / XFERS_PER_ADDR; 
+  const int NXFERS = MAX_ADDR * XFERS_PER_ADDR + 3; 
 
-  struct spi_ioc_transfer xfers[509]; //the maximum number (507 for reads, 1 for setting mode, 1 for setting channel) 
+  struct spi_ioc_transfer xfers[NXFERS]; //the maximum number (507 for reads, 1 for setting mode, 1 for setting channel, 1 for setting  buffer) 
   uint8_t naddress = finish - start + 1; 
   uint8_t leftover = naddress % MAX_ADDR; 
   uint8_t niter = naddress / MAX_ADDR + (leftover ? 1 : 0); 
   uint8_t i; 
-  init_xfers(509,xfers); 
+  init_xfers(NXFERS,xfers); 
 
   setup_change_mode(xfers, MODE_WAVEFORMS); 
-  xfers[1].tx_buf = (uint64_t) buf_channel[channel]; 
+  xfers[1].tx_buf = (uint64_t) buf_buffer[buffer]; 
+  xfers[2].tx_buf = (uint64_t) buf_channel[channel]; 
   USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us
   for (i = 0; i< niter; i++)
   {
     int naddr = i == niter -1 ? leftover : MAX_ADDR; 
-    int nxfers = (i == 0 ? 2 : 0)  + 13 * naddr; 
-    loop_over_chunks_half_duplex(xfers+2, naddr, start + i * MAX_ADDR, data + i * MAX_ADDR * NP_NUM_CHUNK* NP_SPI_BYTES); 
-    ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), (i == 0 ? xfers : xfers+2) );
+    int nxfers = (i == 0 ? 3 : 0)  + XFERS_PER_ADDR * naddr; 
+    loop_over_chunks_half_duplex(xfers+3, naddr, start + i * MAX_ADDR, data + i * MAX_ADDR * NP_NUM_CHUNK* NP_SPI_BYTES); 
+    ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), (i == 0 ? xfers : xfers+3) );
   }
   DONE(d);  
 
@@ -216,14 +238,14 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 }
 
 
-int nuphase_sw_trigger(nuphase_dev_t * d, unsigned state) 
+int nuphase_sw_trigger(nuphase_dev_t * d ) 
 {
-  uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, state & 0xff };  
+  uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, 1};  
   int ret; 
   USING(d); 
   ret = write(d->spi_fd, buf, NP_SPI_BYTES); 
   DONE(d); 
-  return ret; 
+  return ret == NP_SPI_BYTES ? 0 : -1;  
 }
 
 int nuphase_calpulse(nuphase_dev_t * d, unsigned state) 
@@ -233,7 +255,7 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state)
   USING(d); 
   ret = write(d->spi_fd, buf, NP_SPI_BYTES); 
   DONE(d); 
-  return ret;
+  return ret == NP_SPI_BYTES ? 0 : 1 ;
 }
 
 
@@ -241,6 +263,7 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state)
 nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int locking)
 {
   int fd = open(devicename, O_RDWR); 
+  nuphase_config_t cfg; 
   if (fd < 0) return 0; 
 
 
@@ -270,6 +293,13 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int loc
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
   ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
 
+  //send the default config 
+  nuphase_config_init(&cfg); 
+
+  // if this is still running in 20 years, someone will have to fix the y2k38 problem 
+  dev->event_number = ((uint64_t)time(0)) << 32; 
+  dev->buffer_length = 624; 
+
   dev->enable_locking = locking; 
 
   if (locking) 
@@ -281,7 +311,28 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio, int loc
 }
 
 
-int nuphase_version(nuphase_dev_t * d, nuphase_version_t * version)
+void nuphase_set_event_number(nuphase_dev_t * d, uint64_t number)
+{
+  d->event_number = number; 
+}
+
+void nuphase_set_buffer_length(nuphase_dev_t * d, uint16_t length)
+{
+  d->buffer_length = length; 
+}
+
+uint64_t nuphase_get_event_number(const nuphase_dev_t * d) 
+{
+  return d->event_number; 
+}
+
+uint16_t nuphase_get_bufferlength(const nuphase_dev_t * d) 
+{
+  return d->buffer_length; 
+}
+
+
+int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
 {
 
   //we need to read 5 registers, so 15 xfers 
@@ -294,11 +345,11 @@ int nuphase_version(nuphase_dev_t * d, nuphase_version_t * version)
 
   init_xfers(16,xfers); 
   setup_change_mode(xfers, MODE_REGISTER); 
-  setup_read_register(xfers+1, REG_FIRMWARE_VER, (uint8_t*) &(version->ver)); 
-  setup_read_register(xfers+4, REG_FIRMWARE_DATE, (uint8_t*) &(version->date)); 
-  setup_read_register(xfers+7, 4, dna_low); 
-  setup_read_register(xfers+10, 5, dna_mid); 
-  setup_read_register(xfers+13, 6, dna_hi); 
+  setup_read_register(xfers+1, REG_FIRMWARE_VER, (uint8_t*) &(info->ver)); 
+  setup_read_register(xfers+4, REG_FIRMWARE_DATE, (uint8_t*) &(info->date)); 
+  setup_read_register(xfers+7, REG_CHIPID_LOW, dna_low); 
+  setup_read_register(xfers+10, REG_CHIPID_MID, dna_mid); 
+  setup_read_register(xfers+13, REG_CHIPID_HI, dna_hi); 
 
 
   USING(d); 
@@ -309,7 +360,7 @@ int nuphase_version(nuphase_dev_t * d, nuphase_version_t * version)
   uint64_t dna_low_big =  dna_low[0] | dna_low[1] << 8 || dna_low[2] << 8;
   uint64_t dna_mid_big =  dna_mid[0] | dna_mid[1] << 8 || dna_mid[2] << 8;
   uint64_t dna_hi_big =  dna_hi[0] | dna_hi[1] << 8 ;
-  version->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
+  info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
 
   return ret; 
 }
@@ -338,13 +389,18 @@ int nuphase_close(nuphase_dev_t * d)
   return ret; 
 }
 
-int nuphase_wait(nuphase_dev_t * d) 
+nuphase_buffer_mask_t nuphase_wait(nuphase_dev_t * d) 
 {
 
   if (!d->gpio_fd) 
   {
-    /* we have to poll, but I don't know how yet */ 
-    return -1; 
+    nuphase_buffer_mask_t something = 0; 
+    while(!something)
+    {
+      usleep(POLL_USLEEP); 
+      something = nuphase_check_buffers(d); 
+    }
+    return something; 
   }
 
   uint32_t info; 
@@ -364,11 +420,54 @@ int nuphase_wait(nuphase_dev_t * d)
     }
   }
 
-  return 0; 
-  
+ return  nuphase_check_buffers(d); 
+}
+
+
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d) 
+{
+
+  uint8_t result; 
+  nuphase_buffer_mask_t mask; 
+  nuphase_read_register(d, REG_STATUS, &result); 
+  mask  = result &  0xf; // only keep lower 4 bits. who knows what's in the other bits? 
+  return mask; 
 }
 
 
 
+int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c) 
+{
+  //TODO 
+}
 
 
+int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d, 
+                                      nuphase_header_t (*headers)[NP_NUM_BUFFER], 
+                                      nuphase_event_t  (*events)[NP_NUM_BUFFER])  
+{
+  nuphase_buffer_mask_t mask; ; 
+  mask = nuphase_wait(d); 
+  if (mask) 
+  {
+    int ret; 
+    ret = nuphase_read_multiple(d,mask,&(*headers)[0], &(*events)[0]); 
+    if (!ret) return __builtin_popcount(mask); 
+    else return -1; 
+  }
+  return 0; 
+}
+
+int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer, nuphase_header_t * header, nuphase_event_t * event)
+{
+  nuphase_buffer_mask_t mask = 1 << buffer; 
+  return nuphase_read_multiple(d,mask,header, event); 
+
+}
+
+
+int nuphase_read_multiple(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nuphase_header_t * headers,  nuphase_event_t * events) 
+{
+
+  //TODO
+}
