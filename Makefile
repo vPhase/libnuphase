@@ -1,10 +1,10 @@
 CC=gcc
 LD=gcc
-CFLAGS+=-fPIC -g
-LDFLAGS+= -lpthread
+CFLAGS+=-fPIC -g -Wall
+LDFLAGS+= -lpthread -lz 
 
-libnuphase.so: nuphasedaq.o 
-	$(CC) -shared $< -o $@ $(LDFLAGS) 
+libnuphase.so: nuphase.o nuphasedaq.o 
+	$(CC) -shared $^ -o $@ $(LDFLAGS) 
 
 clean: 
 	rm -f *.o *.so 
