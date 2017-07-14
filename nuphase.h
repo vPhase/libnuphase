@@ -76,7 +76,7 @@ typedef struct nuphase_header
   uint16_t beam_mask;                  //!< The enabled beams
   uint32_t beam_power[NP_NUM_CHAN];    //!< The power in each beam at the trigger time
   nuphase_trig_type_t trig_type;       //!< The trigger type? 
-  uint16_t deadtime;                   //!< ??? Will we have this available? If so, this will be a fraction
+  uint32_t deadtime;                   //!< ??? Will we have this available? If so, this will be a fraction
   uint8_t buffer_number;               //!< the buffer number (do we need this?) 
   uint8_t channel_mask;                //!< The enabled channels  
   uint8_t buffer_mask;                 //!< The buffer mask at time of read out (do we want this?)   
@@ -93,6 +93,20 @@ typedef struct nuphase_event
   uint16_t buffer_length; //!< The buffer length that is actually filled. Also available in event header. 
   uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. 
 } nuphase_event_t; 
+
+
+/** nuphase status. 
+ * Holds scalers, deadtime, and maybe some other things 
+ **/
+typedef struct nuphase_status
+{
+  uint16_t scalers[NP_NUM_BEAMS];  //!< The scaler for each beam (12 bits) 
+  uint32_t deadtime;               //!< The deadtime fraction (units tbd) 
+
+} nuphase_status_t; 
+
+
+
 
 
 /** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
@@ -118,5 +132,18 @@ int nuphase_event_gzwrite(gzFile f, const nuphase_event_t * ev);
 
 /** Read the event body from a compressed file. Returns 0 on success. The number of bytes read is not sizeof(nuphase_event_t). */ 
 int nuphase_event_gzread(gzFile f, nuphase_event_t * ev); 
+
+/** Write the status to a file. Returns 0 on success. The number of bytes written is not sizeof(nuphase_status_t). */ 
+int nuphase_status_write(FILE * f, const nuphase_status_t * ev); 
+
+/** Read the statusbody from a file. Returns 0 on success. The number of bytes read is not sizeof(nuphase_status_t). */ 
+int nuphase_status_read(FILE * f, nuphase_status_t * ev); 
+
+/** Write the status to a compressed file. Returns 0 on success. The number of bytes written is not sizeof(nuphase_status_t). */ 
+int nuphase_status_gzwrite(gzFile f, const nuphase_status_t * ev); 
+
+/** Read the status from a compressed file. Returns 0 on success. The number of bytes read is not sizeof(nuphase_status_t). */ 
+int nuphase_status_gzread(gzFile f, nuphase_status_t * ev); 
+
 
 #endif

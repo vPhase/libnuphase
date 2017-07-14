@@ -6,9 +6,11 @@
 //and then generic_*_read must be updated to delegate appropriately. 
 #define NUPHASE_HEADER_VERSION 0 
 #define NUPHASE_EVENT_VERSION 0 
+#define NUPHASE_STATUS_VERSION 0 
 
 #define NUPHASE_HEADER_MAGIC 0xa1 
 #define NUPHASE_EVENT_MAGIC  0xd0 
+#define NUPHASE_STATUS_MAGIC 0x57 
 
 //TODO there are apparently much faster versions of these 
 
@@ -86,6 +88,30 @@ struct packet_start
   uint16_t cksum; 
 };
 
+// takes care of the odious task of reading in the packet start 
+static int packet_start_read( struct generic_file gf, struct packet_start * start, uint8_t expected_magic, uint8_t maximum_version)
+{
+  int got; 
+  got = generic_read(gf, sizeof(start->magic), &start->magic); 
+  if (got != sizeof(start->magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
+
+  if (start->magic != expected_magic)
+    return NP_ERR_WRONG_TYPE; 
+
+  got = generic_read(gf, sizeof(start->ver), &start->ver); 
+  if (got != sizeof(start->ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
+
+  if (start->ver > maximum_version) 
+    return NP_ERR_BAD_VERSION; 
+
+  got = generic_read(gf,sizeof(start->cksum), &start->cksum); 
+
+  if (got != sizeof(start->cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
+
+  return 0; 
+}
+
+
 /* The on-disk format is just packet_start followed by the newest version of the
  * the header struct.  Every time the version changes,if we have data we care about, 
  * we need to increment the version. 
@@ -123,22 +149,8 @@ static int nuphase_header_generic_read(struct generic_file gf, nuphase_header_t 
   int wanted; 
   uint16_t cksum; 
 
-  got = generic_read(gf, sizeof(start.magic), &start.magic); 
-
-  if (got != sizeof(start.magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
-
-
-  if (start.magic != NUPHASE_HEADER_MAGIC)
-    return NP_ERR_WRONG_TYPE; 
-
-  got = generic_read(gf, sizeof(start.ver), &start.ver); 
-  if (got != sizeof(start.ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
-
-  if (start.ver > NUPHASE_HEADER_VERSION) 
-    return NP_ERR_BAD_VERSION; 
-
-  got = generic_read(gf,sizeof(start.cksum), &start.cksum); 
-  if (got != sizeof(start.cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  got = packet_start_read(gf, &start, NUPHASE_HEADER_MAGIC, NUPHASE_HEADER_VERSION); 
+  if (got) return got; 
 
   switch(start.ver) 
   {
@@ -165,30 +177,6 @@ static int nuphase_header_generic_read(struct generic_file gf, nuphase_header_t 
   return 0; 
 }
 
-
-int nuphase_header_write(FILE * f, const nuphase_header_t * h) 
-{
-  struct generic_file gf = { .type = STDIO, .handle.f = f }; 
-  return nuphase_header_generic_write(gf, h); 
-}
-
-int nuphase_header_gzwrite(gzFile f, const nuphase_header_t * h) 
-{
-  struct generic_file gf = { .type = ZLIB, .handle.gzf = f }; 
-  return nuphase_header_generic_write(gf, h); 
-}
-
-int nuphase_header_read(FILE * f, nuphase_header_t * h) 
-{
-  struct generic_file gf = { .type = STDIO, .handle.f = f }; 
-  return nuphase_header_generic_read(gf, h); 
-}
-
-int nuphase_header_gzread(gzFile f, nuphase_header_t * h) 
-{
-  struct generic_file gf = { .type = ZLIB, .handle.gzf = f }; 
-  return nuphase_header_generic_read(gf, h); 
-}
 
 /* The on-disk format is just packet_start followed by the newest version of the
  * the event struct. Note that we only write (and compute the checksum for) buffer length bytes for each event. 
@@ -257,22 +245,8 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
   uint16_t cksum; 
   int i; 
 
-  got = generic_read(gf, sizeof(start.magic), &start.magic); 
-
-  if (got != sizeof(start.magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
-
-
-  if (start.magic != NUPHASE_EVENT_MAGIC)
-    return NP_ERR_WRONG_TYPE; 
-
-  got = generic_read(gf, sizeof(start.ver), &start.ver); 
-  if (got != sizeof(start.ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
-
-  if (start.ver > NUPHASE_EVENT_VERSION) 
-    return NP_ERR_BAD_VERSION; 
-
-  got = generic_read(gf,sizeof(start.cksum), &start.cksum); 
-  if (got != sizeof(start.cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  got = packet_start_read(gf, &start, NUPHASE_EVENT_MAGIC, NUPHASE_EVENT_VERSION); 
+  if (got) return got; 
 
 
   //add additional cases if necessary 
@@ -314,6 +288,73 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
   return 0; 
 }
 
+/** The on-disk format is packet_start followed by the newest version of the status struct. 
+ *
+ * Note that the implementation of status and header are basically the same right now... but that might
+ * change if one of the versions changes. 
+ */
+static int nuphase_status_generic_write(struct generic_file gf, const nuphase_status_t *st) 
+{
+  struct packet_start start; 
+  int written; 
+  start.magic = NUPHASE_STATUS_MAGIC; 
+  start.ver = NUPHASE_STATUS_VERSION; 
+  start.cksum = stupid_fletcher16(sizeof(nuphase_status_t), st); 
+
+  written = generic_write(gf, sizeof(start), &start); 
+  if (written != sizeof(start)) 
+  {
+    return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
+
+  written = generic_write(gf, sizeof(nuphase_status_t), st); 
+  
+  if (written != sizeof(nuphase_status_t))
+  {
+    return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
+
+  return 0; 
+}
+
+static int nuphase_status_generic_read(struct generic_file gf, nuphase_status_t *st) 
+{
+  struct packet_start start; 
+  int got; 
+  int wanted; 
+  uint16_t cksum; 
+
+  got = packet_start_read(gf, &start, NUPHASE_STATUS_MAGIC, NUPHASE_STATUS_VERSION); 
+  if (!got) return got; 
+
+  switch(start.ver) 
+  {
+    //add cases here if necessary 
+    case NUPHASE_STATUS_VERSION: //this is the most recent status!
+      wanted = sizeof(nuphase_status_t); 
+      got = generic_read(gf, wanted, st); 
+      cksum = stupid_fletcher16(wanted, st); 
+      break; 
+    default: 
+    return NP_ERR_BAD_VERSION; 
+  }
+
+  if (wanted!=got)
+  {
+    return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
+
+  if (cksum != start.cksum) 
+  {
+    return NP_ERR_CHECKSUM_FAILED; 
+  }
+
+  return 0; 
+}
+
+/* 
+ * these should all probably be generated by a macro instead of my copy-paste job...
+ **/
 
 int nuphase_event_write(FILE * f, const nuphase_event_t * ev) 
 {
@@ -339,6 +380,53 @@ int nuphase_event_gzread(gzFile f, nuphase_event_t * ev)
   return nuphase_event_generic_read(gf, ev); 
 }
 
+int nuphase_status_write(FILE * f, const nuphase_status_t * ev) 
+{
+  struct generic_file gf=  { .type = STDIO, .handle.f = f }; 
+  return nuphase_status_generic_write(gf, ev); 
+}
+
+int nuphase_status_gzwrite(gzFile f, const nuphase_status_t * ev) 
+{
+  struct generic_file gf=  { .type = ZLIB, .handle.gzf = f }; 
+  return nuphase_status_generic_write(gf, ev); 
+}
+
+int nuphase_status_read(FILE * f, nuphase_status_t * ev) 
+{
+  struct generic_file gf=  { .type = STDIO, .handle.f = f }; 
+  return nuphase_status_generic_read(gf, ev); 
+}
+
+int nuphase_status_gzread(gzFile f, nuphase_status_t * ev) 
+{
+  struct generic_file gf=  { .type = ZLIB, .handle.gzf = f }; 
+  return nuphase_status_generic_read(gf, ev); 
+}
+
+int nuphase_header_write(FILE * f, const nuphase_header_t * h) 
+{
+  struct generic_file gf = { .type = STDIO, .handle.f = f }; 
+  return nuphase_header_generic_write(gf, h); 
+}
+
+int nuphase_header_gzwrite(gzFile f, const nuphase_header_t * h) 
+{
+  struct generic_file gf = { .type = ZLIB, .handle.gzf = f }; 
+  return nuphase_header_generic_write(gf, h); 
+}
+
+int nuphase_header_read(FILE * f, nuphase_header_t * h) 
+{
+  struct generic_file gf = { .type = STDIO, .handle.f = f }; 
+  return nuphase_header_generic_read(gf, h); 
+}
+
+int nuphase_header_gzread(gzFile f, nuphase_header_t * h) 
+{
+  struct generic_file gf = { .type = ZLIB, .handle.gzf = f }; 
+  return nuphase_header_generic_read(gf, h); 
+}
 
 
 
