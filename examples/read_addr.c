@@ -4,7 +4,7 @@
 #include <sys/time.h> 
 #include <stdlib.h>
 
-// just_read spidev, buffer, start_addr, end_addr, 
+// read_addr spidev, buffer, start_addr, end_addr, 
 int main(int nargs, char ** args )
 {
 
@@ -22,7 +22,7 @@ int main(int nargs, char ** args )
 
   if (nargs < 5) 
   {
-    printf("Usage: just_read spidev buffer start_addr end_addr\n"); 
+    printf("Usage: read_addr spidev buffer start_addr end_addr\n"); 
     return 1; 
   }
 
