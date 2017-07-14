@@ -128,16 +128,32 @@ int nuphase_sw_trigger(nuphase_dev_t * d);
 /** Change the state of the calpulser */ 
 int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ; 
 
-/** Waits for data to be available (or might be interrupted by a signal).
+/** Waits for data to be available, or time out, or nuphase_cancel_wait. 
  * 
  * If a hardware interrupt is available, we will wait for that. Otherwise we
- * will poll. 
+ * will keep polling nuphase_check_buffers. 
  *
- * Returns the buffer mask at the end (if it's 0, it means nothing is ready to
- * read.
+ * If ready is passed, it will be filled after done waiting. Normally it should
+ * be non-zero unless interrupted or the timeout is reached. 
+ *
+ * A timeout may be passed in seconds if you don't want to wait forever (and who wouldn't?) 
+ *
+ * The "correct way" to interrupt this by using nuphase_cancel_wait (either
+ * from a signal handler or another thread). 
+ *
+ * If interrupted, (normally by nuphase_cancel_wait, although when using the
+ * GPIO interrupt, could also be interrupted by a signal), will return EINTR and ready (if passed) will be set to 0. 
+ *
+ * We also immediately return EAGAIN if there is a previous call to nuphase_cancel_wait that didn't actually cancel anything (like
+ * if it was called when nothing was waiting). 
+ *
+ * Right now only one thread is allowed to wait at a time. If you try waiting from another
+ * thread, it will return EBUSY. This is only enforced if the device has locks enabled.  
+ *
+ * Returns 0 on success,  
+ * 
  **/
-
-nuphase_buffer_mask_t nuphase_wait(nuphase_dev_t *d); 
+int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds); 
 
 /** Checks to see which buffers are ready to be read */ 
 nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d);
@@ -235,6 +251,11 @@ int nuphase_read(nuphase_dev_t *d, uint8_t* buffer);
 /** Clear the specified buffers. Returns 0 on success. */ 
 int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask); 
 
+/** This cancels the current nuphase_wait. If there
+ * is no nuphase_wait, it will prevent the first  future one from running
+ * Should be safe to call this from a signal handler (hopefully :). 
+ */
+void nuphase_cancel_wait(nuphase_dev_t *d) ; 
 
 /** 
  * low level register read 
@@ -247,7 +268,6 @@ int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask);
  * 
  **/ 
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result); 
-
 
 
 #endif

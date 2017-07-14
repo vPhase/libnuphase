@@ -1,15 +1,21 @@
+#define _GNU_SOURCE //required for ppoll. 
+
 #include "nuphasedaq.h" 
+#include <linux/spi/spidev.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <string.h>
 #include <stdlib.h>
-#include <linux/spi/spidev.h>
 #include <pthread.h> 
 #include <arpa/inet.h> 
+#include <signal.h>
+#include <errno.h> 
 
 #define NP_ADDRESS_MAX 128 
 #define NP_SPI_BYTES  NP_WORD_SIZE
@@ -63,6 +69,23 @@ typedef enum
   MODE_BEAMS=2,
   MODE_POWERSUM=3
 } nuphase_readout_mode_t; 
+
+struct nuphase_dev
+{
+  const char * device_name; 
+  int spi_fd; 
+  int gpio_fd; 
+  int enable_locking; 
+  uint64_t event_number; 
+  nuphase_config_t cfg; 
+  uint16_t buffer_length; 
+  pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
+  pthread_mutex_t wait_mut; //mutex for the waiting. Only used if enable_locking is true
+  uint8_t board_id; 
+  volatile int cancel_wait; // needed for signal handlers 
+  volatile int waiting; 
+  long waiting_thread;     // needed for signal handlers (if gpio is used) 
+}; 
 
 
 
@@ -161,19 +184,6 @@ static void init_xfers(int n, struct spi_ioc_transfer * xfers)
 }
 
 
-
-struct nuphase_dev
-{
-  const char * device_name; 
-  int spi_fd; 
-  int gpio_fd; 
-  int enable_locking; 
-  uint64_t event_number; 
-  nuphase_config_t cfg; 
-  uint16_t buffer_length; 
-  pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
-  uint8_t board_id; 
-}; 
 
 #define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
 #define DONE(d)  if (d->enable_locking) pthread_mutex_unlock(&d->mut);
@@ -361,6 +371,8 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   dev = malloc(sizeof(nuphase_dev_t)); 
   dev->device_name = devicename; 
   dev->spi_fd =fd;
+  dev->waiting = 0; 
+  dev->cancel_wait = 0; 
 
   if (gpio) 
   {
@@ -400,6 +412,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   if (locking) 
   {
     pthread_mutex_init(&dev->mut,0); 
+    pthread_mutex_init(&dev->wait_mut,0); 
   }
 
   return dev; 
@@ -481,12 +494,23 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
 int nuphase_close(nuphase_dev_t * d) 
 {
   int ret = 0; 
+  nuphase_cancel_wait(d); 
   USING(d); 
   if (d->enable_locking)
   {
     //this should be allowed? 
     pthread_mutex_unlock(&d->mut); 
     ret += 64* pthread_mutex_destroy(&d->mut); 
+
+    if (pthread_mutex_trylock(&d->wait_mut)) // lock is beind held by a thread
+    {
+      nuphase_cancel_wait(d); 
+      pthread_mutex_lock(&d->wait_mut); 
+    }
+
+    pthread_mutex_unlock(&d->wait_mut); 
+    ret += 128* pthread_mutex_destroy(&d->wait_mut); 
+
     d->enable_locking = 0; 
   }
 
@@ -500,39 +524,179 @@ int nuphase_close(nuphase_dev_t * d)
   return ret; 
 }
 
-nuphase_buffer_mask_t nuphase_wait(nuphase_dev_t * d) 
+void nuphase_cancel_wait(nuphase_dev_t *d) 
+{
+  d->cancel_wait = 1;  //this is necessary for polling and will sometimes catch the interrupt as well
+  if (d->waiting_thread) 
+  {
+    syscall(SYS_tgkill, getpid(), d->waiting_thread, SIGINT);  //we need to send a SIGINT in case we are stuck inside poll. 
+  }
+}
+
+// this is the most annoying (and probably buggiest) part of the code.
+// it's difficult because we want to be  able to quickly cancel a 
+//
+int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float timeout) 
 {
 
+  //If locking is enabled and a second thread attempts
+  //to wait for the same device, return EBUSY. 
+  // making nuphase_wait for multiple threads sounds way too hard
+  if (d->enable_locking) 
+  {
+    if (pthread_mutex_trylock(&d->wait_mut))
+    {
+      return EBUSY; 
+    }
+  }
+
+  /* This was cancelled before (or almost concurrently with when)  we started.
+  /  We'll just clear the cancel and return EAGAIN. I thought long and hard
+  /  about what to do in the case that nuphase_cancel_wait is called and there
+  /  is nothing waiting, but I think attempting to detect if nuphase_wait is
+  /  currently called is fraught with race conditions. Anyway,
+  /  nuphase_cancel_wait will probably not be called willy-nilly... usually
+  /  just when you want to exit the program I imagine. 
+  */
+  
+  if (d->cancel_wait) 
+  {
+    d->cancel_wait = 0; 
+    return EAGAIN; 
+  }
+
+
+
+  //No gpio, we will just keep polling buffer mask
+  // This is the simpler (but less efficient) case  
   if (!d->gpio_fd) 
   {
     nuphase_buffer_mask_t something = 0; 
-    while(!something)
+    float waited = 0; 
+
+    // keep trying until we either get something, are cancelled, or exceed our timeout (if we have a timeout) 
+    while(!something && (timeout <= 0 || waited < timeout))
     {
+      if (d->cancel_wait) break; 
       usleep(POLL_USLEEP); 
+      waited += POLL_USLEEP * 1e-6; //us to s 
       something = nuphase_check_buffers(d); 
     }
-    return something; 
+    int interrupted = d->cancel_wait; //were we interrupted? 
+
+    if (ready_buffers) *ready_buffers = something;  //save to ready
+    d->cancel_wait = 0;  //clear the wait
+    if (d->enable_locking) pthread_mutex_unlock(&d->wait_mut);   //unlock the mutex
+    return interrupted ? EINTR : 0; 
   }
 
-  uint32_t info; 
-  struct pollfd fds = { .fd = d->gpio_fd, .events = POLLIN }; 
-  int ret = poll(&fds,1,-1);  
-  if (ret < 0) return ret; 
+  /*
+  * If we are using the gpio interrupt, this becomes more complicated.  We
+  * would block on the interrupt until we exceed our timeout (which may be
+  * eternity). A signal would interrupt the call, but we may be called in a
+  * context where the signal may not be available , or we might be in a thread
+  * where the signal will not get deliver. 
+  *
+  * Hopefully what I'm doing makes sense. 
+  */ 
 
+  int ret = 0;
+
+
+  // tell t he device which thread is waiting
+  d->waiting_thread = syscall(SYS_gettid); 
+
+  //we want to block all signals until 
+  //we get to poll. Fewer things to worry about .. 
+  sigset_t old;  //save the old signal mask to restore at the end
+  sigset_t all; 
+  sigfillset(&all); 
+  pthread_sigmask(SIG_BLOCK, &all,&old); 
+
+  //before we poll, check again to make sure we weren't already cancelled 
+  if (d->cancel_wait)
+  {
+    ret = EINTR;
+    goto cleanup; 
+  }
+
+
+
+  // tell ppoll to listen for SIGINT. Maybe this isn't the best signal, we can change it later. 
+  sigset_t pollsigs; 
+  sigfillset(&pollsigs); 
+  sigdelset(&pollsigs,SIGINT); 
+
+  //set up what we need for ppoll
+  struct timespec ts; 
+  ts.tv_sec = (int) timeout; 
+  ts.tv_nsec = (timeout - ts.tv_sec) * 1e9; 
+  struct pollfd fds = { .fd = d->gpio_fd, .events = POLLIN }; 
+
+  //call ppoll. It will tell us if we got an interrupt, or timeout, or get interrupted (hopefully) by SIGINT 
+  ret = ppoll(&fds,1, timeout <=0 ? 0 : &ts ,&pollsigs);  
+
+  if (ret == 0)  // we timed out. 
+  {
+    if (*ready_buffers) *ready_buffers = 0;
+    goto cleanup; 
+  }
+
+  if (ret < 0)
+  {
+    //this means we got interrupted, I think. 
+    ret = errno; 
+    goto cleanup; 
+  }
+
+
+  //alright, now we have to read the interrupt
+  uint32_t info; 
   int nb = read(d->gpio_fd,&info, sizeof(info)); 
 
+  //if we read it successfully, we'll unmask it.
   if (nb  == sizeof(info)) 
   {
     //let's unmask the interrupt
     uint32_t unmask = 1;
-    if (write(d->gpio_fd,&unmask,sizeof(unmask)) < 0) 
+    nb = write(d->gpio_fd,&unmask,sizeof(unmask));
+    if (nb < 0) 
     {
-      return -1; 
+      ret = errno;
+      fprintf(stderr,"Couldn't unmask interrupt, and I'm going to leave it in a bad state :( \n"); 
+      goto cleanup; 
     }
   }
+  else
+  {
+    ret = errno; 
+    fprintf(stderr,"Couldn't read from interrupt, and I'm going to leave it in a bad sate :( \n"); 
+    goto cleanup; 
+  }
 
- return  nuphase_check_buffers(d); 
+ //if we made it this far, this means we unmasked the interrupt, we probably got something, 
+ if (ready_buffers) *ready_buffers = nuphase_check_buffers(d); 
+ ret = 0;  //we want to return success
+
+ cleanup: 
+ //we had an oops, so we haven't filled this yet. fill it with 0.
+ if (ret && ready_buffers) *ready_buffers = 0; 
+
+ //restore signal mask 
+ pthread_sigmask(SIG_SETMASK, &old,0); 
+
+ //we aren't waiting any more
+ d->waiting_thread = 0; 
+ //clear the wait
+ d->cancel_wait = 0; 
+
+ //unlock mutex
+ if (d->enable_locking) pthread_mutex_unlock(&d->wait_mut); 
+
+ return ret;
+
 }
+
 
 
 nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d) 
@@ -650,8 +814,7 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
                                       nuphase_event_t  (*events)[NP_NUM_BUFFER])  
 {
   nuphase_buffer_mask_t mask; ; 
-  mask = nuphase_wait(d); 
-  if (mask) 
+  if (!nuphase_wait(d,&mask,-1) && mask) 
   {
     int ret; 
     ret = nuphase_read_multiple_array(d,mask,&(*headers)[0], &(*events)[0]); 
