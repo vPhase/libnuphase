@@ -137,6 +137,11 @@ int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo);
 int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config); 
 
 
+
+/** Fills in the status struct 
+ **/ 
+int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat); 
+
 /**
  * Highest level read function. This will wait for data, read it into the 
  * required number of events, clear the buffer, and increment the event number appropriately 

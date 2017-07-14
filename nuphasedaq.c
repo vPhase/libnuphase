@@ -14,7 +14,7 @@
 #define NP_ADDRESS_MAX 128 
 #define NP_SPI_BYTES  NP_WORD_SIZE
 #define NP_NUM_MODE 4
-#define NP_NUM_REGISTER 16
+#define NP_NUM_REGISTER 128
 #define BUF_MASK 0xf
 #define MAX_PRETRIGGER 8 
 
@@ -35,6 +35,9 @@ typedef enum
   REG_CHIPID_LOW = 0x04,  
   REG_CHIPID_MID = 0x05,  
   REG_CHIPID_HI = 0x06,  
+  REG_SCALER_READ = 0x07, 
+  REG_UPDATE_SCALERS = 0x28, 
+  REG_PICK_SCALER = 0x29, 
   REG_CALPULSE=0x2a, //cal pulse
   REG_CHANNEL_MASK=0x30, 
   REG_READ=0x47, //send data to spi miso 
@@ -70,8 +73,11 @@ static uint8_t buf_channel[NP_NUM_CHAN][NP_SPI_BYTES];
 static uint8_t buf_buffer[NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
-static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
 static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
+static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+
+static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
+static uint8_t buf_update_scalers[NP_SPI_BYTES] = {REG_UPDATE_SCALERS,0,0,1} ; 
 
 static void fillBuffers() __attribute__((constructor)); //this will fill them
 
@@ -109,8 +115,6 @@ void fillBuffers()
     buf_buffer[i][3] = i; 
   }
 
-
-
   memset(buf_ram_addr,0,sizeof(buf_ram_addr)); 
   for (i = 0; i < NP_ADDRESS_MAX; i++) 
   {
@@ -127,10 +131,16 @@ void fillBuffers()
   }
 
   memset(buf_clear,0,sizeof(buf_clear)); 
-
   for (i = 0; i < (1 << NP_NUM_BUFFER); i++)
   {
     buf_chunk[i][0]=REG_CLEAR; 
+    buf_chunk[i][3]=i;  
+  }
+
+  memset(buf_pick_scaler,0,sizeof(buf_pick_scaler)); 
+  for (i = 0; i < (1 << NP_NUM_BEAMS); i++)
+  {
+    buf_chunk[i][0]=REG_PICK_SCALER; 
     buf_chunk[i][3]=i;  
   }
 }
@@ -243,16 +253,23 @@ static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t nadd
 
   int iaddr; 
   int ichunk; 
+  int ret = 0; 
 
   for (iaddr  =0; iaddr < naddr; iaddr++) 
   {
-    xfer_buffer_append(xfers, buf_ram_addr[start_address + iaddr], 0); 
+    ret += xfer_buffer_append(xfers, buf_ram_addr[start_address + iaddr], 0); 
+    if (ret) return ret; 
 
     for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
     {
-      xfer_buffer_append(xfers, buf_chunk[ichunk], 0); 
-      xfer_buffer_append(xfers, buf_read, 0); 
-      xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK * iaddr + ichunk * NP_SPI_BYTES); 
+      ret+= xfer_buffer_append(xfers, buf_chunk[ichunk], 0); 
+      if (ret) return ret; 
+
+      ret+= xfer_buffer_append(xfers, buf_read, 0); 
+      if (ret) return ret; 
+
+      ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK * iaddr + ichunk * NP_SPI_BYTES); 
+      if (ret) return ret; 
     }
   }
 
@@ -265,14 +282,14 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t 
   struct xfer_buffer xfers; 
   xfer_buffer_init(&xfers, d->spi_fd); 
   uint8_t naddress = finish - start + 1; 
-
-  //TODO should probably add some error checks and stuff... 
-  xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS], 0); 
-  xfer_buffer_append(&xfers, buf_buffer[buffer], 0); 
-  xfer_buffer_append(&xfers, buf_channel[channel], 0); 
-  USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us
-  loop_over_chunks_half_duplex(&xfers, naddress, start, data); 
-  xfer_buffer_send(&xfers); //pick up the stragglers. 
+  int ret = 0; 
+  ret += xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
+  ret += xfer_buffer_append(&xfers, buf_buffer[buffer], 0);  if (ret) return 0; 
+  ret += xfer_buffer_append(&xfers, buf_channel[channel], 0);  if (ret) return 0; 
+  USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us.  
+            // we don't lock before these because there is no way we sent enough transfers to trigger a read 
+  ret += loop_over_chunks_half_duplex(&xfers, naddress, start, data);
+  if(!ret) xfer_buffer_send(&xfers); //pick up the stragglers. 
   DONE(d);  
 
   return 0; 
@@ -674,6 +691,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     //TODO should probably add some error checks and stuff... 
     //set the buffer 
     ret+=xfer_buffer_append(&xfers, buf_buffer[ibuf],0); 
+    if (ret) goto the_end; 
 
     //TODO read metadata once that is fully implemented 
     
@@ -684,16 +702,25 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     ev[ibuf]->buffer_length = d->buffer_length; 
 
     ret+=xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS],0); 
+    if (ret) goto the_end; 
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
       ret+=xfer_buffer_append(&xfers, buf_channel[ichan],0); 
-      loop_over_chunks_half_duplex(&xfers, hd[ibuf]->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[ibuf]->data[ichan]); 
+      if (ret) goto the_end; 
+
+      ret+=loop_over_chunks_half_duplex(&xfers, hd[ibuf]->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[ibuf]->data[ichan]); 
     }
     ret+=xfer_buffer_append(&xfers, buf_clear[1 << ibuf],0); 
+    if (ret) goto the_end; 
+
     ret+=xfer_buffer_send(&xfers); //flush so we can clear the buffer immediately 
+    if (ret) goto the_end; 
 
     iout++; 
   }
+
+  the_end:
+
   DONE(d); 
 
   return ret; 
@@ -727,5 +754,47 @@ int nuphase_read(nuphase_dev_t *d,uint8_t* buffer)
   return got == NP_SPI_BYTES ? 0 : -1; 
 }
 
+
+
+int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st) 
+{
+  //TODO: fill in deadtime when I figure out how. 
+  int ret; 
+  int ixfer = 0; 
+  int i; 
+  uint8_t wide_scalers[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+
+  //cheating  because const int is apparently not constant in C
+  enum {nxfers = 1 + 1 + NP_NUM_BEAMS * 3};   //one set mode register, one update scalers, num_beams *  ( pick scaler, read register, read) 
+
+  _Static_assert (nxfers < 512, "TOO MANY IOC MESSAGES" ); 
+
+  struct spi_ioc_transfer xfers[nxfers];
+  init_xfers(nxfers, xfers); 
+
+  xfers[ixfer++].tx_buf = SPI_CAST buf_mode[MODE_REGISTER]; 
+  xfers[ixfer++].tx_buf = SPI_CAST buf_update_scalers; 
+
+  for (i = 0; i < NP_NUM_BEAMS; i++) 
+  {
+    xfers[ixfer++].tx_buf = SPI_CAST buf_pick_scaler[i]; 
+    xfers[ixfer++].tx_buf = SPI_CAST buf_set_read_reg[REG_SCALER_READ]; 
+    xfers[ixfer++].rx_buf = SPI_CAST wide_scalers[i]; 
+  }
+
+  USING(d); 
+  ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), xfers); 
+  DONE(d); 
+
+  if (!ret) return ret; 
+
+  st->deadtime = 0; //TODO 
+  for (i = 0; i < NP_NUM_BEAMS; i++) 
+  {
+    st->scalers[i] = wide_scalers[i][3] | (wide_scalers[i][2] << 8 ); 
+  }
+
+  return 0; 
+}
 
 
