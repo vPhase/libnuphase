@@ -1,5 +1,6 @@
 #include "nuphasedaq.h" 
 #include <stdio.h> 
+#include <inttypes.h>
 #include <stdlib.h> 
 
 
@@ -30,7 +31,7 @@ int main(int nargs, char ** args)
   {
     printf("FW VER: %u\n",fw.ver); 
     printf("FW DATE: %u\n",fw.date); 
-    printf("BOARD DNA: 0x%zx\n",fw.dna); 
+    printf("BOARD DNA: 0x %" PRIu64 "\n",fw.dna); 
   }
 
 
