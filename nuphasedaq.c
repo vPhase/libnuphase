@@ -172,6 +172,7 @@ struct nuphase_dev
   nuphase_config_t cfg; 
   uint16_t buffer_length; 
   pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
+  uint8_t board_id; 
 }; 
 
 #define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
@@ -334,6 +335,7 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state)
 }
 
 
+static int board_id_counter =1; 
 
 nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
                              const nuphase_config_t * c,  int locking)
@@ -391,6 +393,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->event_number = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
+  dev->board_id = board_id_counter++; 
 
   dev->enable_locking = locking; 
 
@@ -400,6 +403,16 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   }
 
   return dev; 
+}
+
+void nuphase_set_board_id(nuphase_dev_t * d, uint8_t id)
+{
+  d->board_id = id; 
+}
+
+uint8_t nuphase_get_board_id(const nuphase_dev_t * d) 
+{
+  return d->board_id; 
 }
 
 
@@ -697,9 +710,13 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     
     hd[ibuf]->buffer_mask = mask; 
     hd[ibuf]->buffer_length = d->buffer_length; 
+    hd[ibuf]->readout_time = now.tv_sec; 
+    hd[ibuf]->readout_time_ns = now.tv_nsec; 
     hd[ibuf]->event_number = d->event_number; //this will be checked against hardware number! 
+    hd[ibuf]->board_id = d->board_id; 
     ev[ibuf]->event_number = d->event_number; 
     ev[ibuf]->buffer_length = d->buffer_length; 
+    ev[ibuf]->board_id = d->board_id; 
 
     ret+=xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS],0); 
     if (ret) goto the_end; 
@@ -762,7 +779,10 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
   int ret; 
   int ixfer = 0; 
   int i; 
+  struct timespec now; 
   uint8_t wide_scalers[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+
+  st->board_id = d->board_id; 
 
   //cheating  because const int is apparently not constant in C
   enum {nxfers = 1 + 1 + NP_NUM_BEAMS * 3};   //one set mode register, one update scalers, num_beams *  ( pick scaler, read register, read) 
@@ -782,6 +802,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
     xfers[ixfer++].rx_buf = SPI_CAST wide_scalers[i]; 
   }
 
+  clock_gettime(CLOCK_REALTIME, &now); 
   USING(d); 
   ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), xfers); 
   DONE(d); 
@@ -793,6 +814,8 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
   {
     st->scalers[i] = wide_scalers[i][3] | (wide_scalers[i][2] << 8 ); 
   }
+  st->readout_time = now.tv_sec; 
+  st->readout_time_ns = now.tv_nsec; 
 
   return 0; 
 }

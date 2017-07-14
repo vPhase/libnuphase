@@ -69,28 +69,34 @@ typedef struct nuphase_fwinfo
  * https://yurovsky.github.io/2014/10/10/linux-uio-gpio-interrupt/) to know
  * when data is available without polling. 
  *
- * Optionally, a mutex can be created to help synchornize access to this device from multiple threads. 
+ * Optionally, a mutex can be created to help synchornize access to this device
+ * from multiple threads. 
  *
- * For now, the device handle also keeps track of the buffer length and the event number. On initialization, the
- * buffer length is set to the default amount (624 samples) and the event number is set to unixtime << 32. They can be
- * set to something better using nuphase_set_buffer_length and nuphase_set_event_number.
+ * For now, the device handle also keeps track of the board id, buffer length
+ * and the event number. On initialization, the board id is set to the next
+ * available id, buffer length is set to the default amount (624 samples) and
+ * the event number is set to unixtime << 32. They can be set to something
+ * better using nuphase_set_board_id, nuphase_set_buffer_length and nuphase_set_event_number.
  *
- * The default nuphase_config_t is also sent on startup. Changes can be made using nuphase_configure. 
+ * The default nuphase_config_t is also sent on startup. Changes can be made
+ * using nuphase_configure. 
  *
- * The access to the SPI file descriptor is locked when opening, so only one process can hold it. 
+ * The access to the SPI file descriptor is locked when opening, so only one
+ * process can hold it. 
  *
  * If that turns out to be too slow, I guess we can write a kernel driver. 
  *
- * @param spi_device_name The SPI device (likely something like  /sys/bus/spi/devices/spi1.0 )
- * @param gpio_interrupt_device_name The GPIO device acting as an interrupt (e.g. /dev/uio0). This is purely optional, if not defined, we will busy wait. 
- * @param cfg          If non-zero, this config is used instead of the default initial one. 
- * @param lock_access  If 1, a mutex will be initialized that will control concurrent access to this device from multiple threads
- * @returns a pointer to the file descriptor, or 0 if something went wrong. 
+ * @param spi_device_name The SPI device (likely something like
+ * /sys/bus/spi/devices/spi1.0 ) @param gpio_interrupt_device_name The GPIO
+ * device acting as an interrupt (e.g. /dev/uio0). This is purely optional, if
+ * not defined, we will busy wait.  @param cfg          If non-zero, this
+ * config is used instead of the default initial one.  @param lock_access  If
+ * 1, a mutex will be initialized that will control concurrent access to this
+ * device from multiple threads @returns a pointer to the file descriptor, or 0
+ * if something went wrong. 
  */
-nuphase_dev_t * nuphase_open(const char * spi_device_name, 
-                             const char * gpio_interrupt_device_name,
-                             const nuphase_config_t * cfg,
-                             int lock_access); 
+nuphase_dev_t * nuphase_open(const char * spi_device_name, const char *
+    gpio_interrupt_device_name, const nuphase_config_t * cfg, int lock_access); 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
@@ -100,6 +106,14 @@ void nuphase_set_event_number(nuphase_dev_t * d, uint64_t number) ;
 
 /**Retrieve the event number for the current event */
 uint64_t nuphase_get_event_number(const nuphase_dev_t * d) ; 
+
+/**Set the board id for the device */
+void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
+
+/**Retrieve the board id for the current event */
+uint8_t nuphase_get_board_id(const nuphase_dev_t * d) ; 
+
+
 
 /** Set the length of the readout buffer. Can be anything between 0 and 2048. (default is 624). */ 
 void nuphase_set_buffer_length(nuphase_dev_t *d, uint16_t buffer); 
