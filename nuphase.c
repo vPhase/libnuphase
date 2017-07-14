@@ -430,3 +430,16 @@ int nuphase_header_gzread(gzFile f, nuphase_header_t * h)
 
 
 
+/* pretty prints */ 
+
+int nuphase_print_status(FILE *f, const nuphase_status_t *st)
+{
+  int i ; 
+  for (i = 0; i < NP_NUM_BEAMS; i++)
+  {
+    fprintf(f,"BEAM %d:  %u \n",i, st->scalers[i]); 
+  }
+  return 0; 
+}
+
+

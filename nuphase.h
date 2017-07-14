@@ -106,8 +106,8 @@ typedef struct nuphase_status
 } nuphase_status_t; 
 
 
-
-
+/** print the status  prettily */
+int nuphase_print_status(FILE *f, const nuphase_status_t * st) ; 
 
 /** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
 int nuphase_header_write(FILE * f, const nuphase_header_t * h); 
