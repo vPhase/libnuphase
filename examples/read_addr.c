@@ -18,7 +18,6 @@ int main(int nargs, char ** args )
   struct timespec t1; 
 
   nuphase_dev_t * dev;
-  nuphase_fwinfo_t fwinfo; 
 
   if (nargs < 5) 
   {
@@ -38,7 +37,6 @@ int main(int nargs, char ** args )
 
 
   dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
-  nuphase_fwinfo(dev, &fwinfo); 
   nuphase_sw_trigger(dev); 
 
   clock_gettime(CLOCK_MONOTONIC,&t0); 
@@ -52,9 +50,6 @@ int main(int nargs, char ** args )
 
   nuphase_close(dev); 
 
-  printf("FIRMWARE fwinfo: %u\n", fwinfo.ver); 
-  printf("FIRMWARE DATE: %u\n", fwinfo.date); 
-  printf("DNA: %lx\n", fwinfo.dna); 
   printf("Approx time to read out:  %g ms\n", 1000*t1.tv_sec + 1e-6 * t1.tv_nsec - 1000 * t0.tv_sec - 1e-6  * t0.tv_nsec); 
 
 
