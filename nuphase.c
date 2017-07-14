@@ -119,40 +119,40 @@ static int nuphase_header_generic_write(struct generic_file gf, const nuphase_he
 static int nuphase_header_generic_read(struct generic_file gf, nuphase_header_t *h) 
 {
   struct packet_start start; 
-  int read; 
+  int got; 
   int wanted; 
   uint16_t cksum; 
 
-  read = generic_read(gf, sizeof(start.magic), &start.magic); 
+  got = generic_read(gf, sizeof(start.magic), &start.magic); 
 
-  if (read != sizeof(start.magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  if (got != sizeof(start.magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
 
   if (start.magic != NUPHASE_HEADER_MAGIC)
     return NP_ERR_WRONG_TYPE; 
 
-  read = generic_read(gf, sizeof(start.ver), &start.ver); 
-  if (read != sizeof(start.ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  got = generic_read(gf, sizeof(start.ver), &start.ver); 
+  if (got != sizeof(start.ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
   if (start.ver > NUPHASE_HEADER_VERSION) 
     return NP_ERR_BAD_VERSION; 
 
-  read = generic_read(gf,sizeof(start.cksum), &start.cksum); 
-  if (read != sizeof(start.cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  got = generic_read(gf,sizeof(start.cksum), &start.cksum); 
+  if (got != sizeof(start.cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
   switch(start.ver) 
   {
     //add cases here if necessary 
     case NUPHASE_HEADER_VERSION: //this is the most recent header!
       wanted = sizeof(nuphase_header_t); 
-      read = generic_read(gf, wanted, h); 
+      got = generic_read(gf, wanted, h); 
       cksum = stupid_fletcher16(wanted, h); 
       break; 
     default: 
     return NP_ERR_BAD_VERSION; 
   }
 
-  if (wanted!=read)
+  if (wanted!=got)
   {
     return NP_ERR_NOT_ENOUGH_BYTES; 
   }
@@ -252,49 +252,49 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
 static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *ev) 
 {
   struct packet_start start; 
-  int read; 
+  int got; 
   int wanted; 
   uint16_t cksum; 
   int i; 
 
-  read = generic_read(gf, sizeof(start.magic), &start.magic); 
+  got = generic_read(gf, sizeof(start.magic), &start.magic); 
 
-  if (read != sizeof(start.magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  if (got != sizeof(start.magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
 
   if (start.magic != NUPHASE_EVENT_MAGIC)
     return NP_ERR_WRONG_TYPE; 
 
-  read = generic_read(gf, sizeof(start.ver), &start.ver); 
-  if (read != sizeof(start.ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  got = generic_read(gf, sizeof(start.ver), &start.ver); 
+  if (got != sizeof(start.ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
   if (start.ver > NUPHASE_EVENT_VERSION) 
     return NP_ERR_BAD_VERSION; 
 
-  read = generic_read(gf,sizeof(start.cksum), &start.cksum); 
-  if (read != sizeof(start.cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  got = generic_read(gf,sizeof(start.cksum), &start.cksum); 
+  if (got != sizeof(start.cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
 
   //add additional cases if necessary 
   if (start.ver == NUPHASE_EVENT_VERSION) 
   {
       wanted = sizeof(ev->event_number); 
-      read = generic_read(gf, wanted, &ev->event_number); 
-      if (wanted != read) return NP_ERR_NOT_ENOUGH_BYTES; 
+      got = generic_read(gf, wanted, &ev->event_number); 
+      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
       cksum = stupid_fletcher16(wanted, &ev->event_number); 
  
       wanted = sizeof(ev->buffer_length); 
-      read = generic_read(gf, wanted, &ev->buffer_length); 
+      got = generic_read(gf, wanted, &ev->buffer_length); 
 
-      if (wanted != read) return NP_ERR_NOT_ENOUGH_BYTES; 
+      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
 
       cksum = stupid_fletcher16_append(wanted, &ev->buffer_length,cksum); 
 
       for (i = 0; i < NP_NUM_CHAN; i++)
       {
         wanted = ev->buffer_length; 
-        read = generic_read(gf, wanted, ev->data[i]); 
-        if (wanted != read) return NP_ERR_NOT_ENOUGH_BYTES; 
+        got = generic_read(gf, wanted, ev->data[i]); 
+        if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
         cksum = stupid_fletcher16_append(wanted, ev->data[i], cksum); 
 
         // zero out the rest of the memory 
