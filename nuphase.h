@@ -80,6 +80,7 @@ typedef struct nuphase_header
   uint8_t buffer_number;               //!< the buffer number (do we need this?) 
   uint8_t channel_mask;                //!< The enabled channels  
   uint8_t buffer_mask;                 //!< The buffer mask at time of read out (do we want this?)   
+  uint8_t board_id;                   //!< The board number assigned at startup. 
 } nuphase_header_t; 
 
 /**nuphase event body.
@@ -92,6 +93,7 @@ typedef struct nuphase_event
   uint64_t event_number;  //!< The event number. Should match event header.  
   uint16_t buffer_length; //!< The buffer length that is actually filled. Also available in event header. 
   uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. 
+  uint8_t board_id;     //!< The board number assigned at startup. 
 } nuphase_event_t; 
 
 
@@ -102,6 +104,9 @@ typedef struct nuphase_status
 {
   uint16_t scalers[NP_NUM_BEAMS];  //!< The scaler for each beam (12 bits) 
   uint32_t deadtime;               //!< The deadtime fraction (units tbd) 
+  uint32_t readout_time;           //!< CPU time of readout, seconds
+  uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
+  uint8_t board_id;               //!< The board number assigned at startup. 
 
 } nuphase_status_t; 
 

@@ -201,6 +201,7 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
    start.cksum = stupid_fletcher16_append(ev->buffer_length, ev->data[i], start.cksum); 
   }
 
+  start.cksum = stupid_fletcher16_append(sizeof(ev->board_id), &ev->board_id, start.cksum); 
 
   written = generic_write(gf, sizeof(start), &start); 
   if (written != sizeof(start)) 
@@ -233,6 +234,11 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
     }
   }
 
+  written = generic_write(gf, sizeof(ev->board_id), &ev->board_id); 
+  if (written != ev->board_id) 
+  {
+      return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
   return 0; 
 }
 
@@ -259,7 +265,6 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
  
       wanted = sizeof(ev->buffer_length); 
       got = generic_read(gf, wanted, &ev->buffer_length); 
-
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
 
       cksum = stupid_fletcher16_append(wanted, &ev->buffer_length,cksum); 
@@ -274,6 +279,11 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
         // zero out the rest of the memory 
         memset(ev->data[i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
       }
+
+      wanted = sizeof(ev->board_id); 
+      got = generic_read(gf, wanted, &ev->board_id); 
+      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
+      cksum = stupid_fletcher16_append(wanted, &ev->board_id,cksum); 
   }
   else
   {
@@ -435,9 +445,14 @@ int nuphase_header_gzread(gzFile f, nuphase_header_t * h)
 int nuphase_print_status(FILE *f, const nuphase_status_t *st)
 {
   int i ; 
+  struct tm  tim; 
+  char timstr[128]; 
+  gmtime_r((time_t*) &st->readout_time, &tim); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d $H:%M:%S", &tim);  
+  fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id, timstr, st->readout_time_ns); 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
-    fprintf(f,"BEAM %d:  %u \n",i, st->scalers[i]); 
+    fprintf(f,"\tBEAM %d:  %u \n",i, st->scalers[i]); 
   }
   return 0; 
 }
