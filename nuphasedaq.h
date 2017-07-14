@@ -207,6 +207,12 @@ int nuphase_read_multiple_ptr(nuphase_dev_t *d, nuphase_buffer_mask_t mask,
 int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start_ram, uint8_t end_ram, uint8_t * data); 
 
 
+/* Lowest-level write command. Writes 4 bytes from buffer */ 
+int nuphase_write(nuphase_dev_t *d, const uint8_t* buffer); 
+
+/* Lowest-level read command. Reads 4 bytes into buffer */ 
+int nuphase_read(nuphase_dev_t *d, uint8_t* buffer); 
+
 /** Clear the specified buffers. Returns 0 on success. */ 
 int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask); 
 

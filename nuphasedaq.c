@@ -708,3 +708,24 @@ int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask)
   DONE(d); 
   return ret == NP_SPI_BYTES ? 0 : -1; 
 }
+
+int nuphase_write(nuphase_dev_t *d, const uint8_t* buffer)
+{
+  int written = 0; 
+  USING(d); 
+  written = write(d->spi_fd, buffer,NP_SPI_BYTES); 
+  DONE(d); 
+  return written == NP_SPI_BYTES ? 0 : -1; 
+}
+
+int nuphase_read(nuphase_dev_t *d,uint8_t* buffer)
+{
+  int got = 0; 
+  USING(d); 
+  got = read(d->spi_fd, buffer,NP_SPI_BYTES); 
+  DONE(d); 
+  return got == NP_SPI_BYTES ? 0 : -1; 
+}
+
+
+
