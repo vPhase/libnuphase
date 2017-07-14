@@ -3,7 +3,7 @@ CFLAGS+=-g  -I../
 LDFLAGS+= -L../ -lnuphase
 
 
-EXAMPLES=just_read
+EXAMPLES=read_addr
 
 all: $(EXAMPLES) 
 
