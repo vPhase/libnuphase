@@ -156,15 +156,15 @@ void fillBuffers()
   memset(buf_clear,0,sizeof(buf_clear)); 
   for (i = 0; i < (1 << NP_NUM_BUFFER); i++)
   {
-    buf_chunk[i][0]=REG_CLEAR; 
-    buf_chunk[i][3]=i;  
+    buf_clear[i][0]=REG_CLEAR; 
+    buf_clear[i][3]=i;  
   }
 
   memset(buf_pick_scaler,0,sizeof(buf_pick_scaler)); 
   for (i = 0; i < (1 << NP_NUM_BEAMS); i++)
   {
-    buf_chunk[i][0]=REG_PICK_SCALER; 
-    buf_chunk[i][3]=i;  
+    buf_pick_scaler[i][0]=REG_PICK_SCALER; 
+    buf_pick_scaler[i][3]=i;  
   }
 }
 
