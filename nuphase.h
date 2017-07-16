@@ -67,6 +67,7 @@ typedef enum nuphase_trigger_type
 typedef struct nuphase_header 
 {
   uint64_t event_number;               //!< the event number assigned to this event. Will match the event body. 
+  uint64_t trig_number;                //!< the trigger number assigned to this event. If there is deadtime, this will diverge from event_number. 
   uint16_t buffer_length;              //!< the buffer length. Stored both here and in the event. 
   uint16_t pretrigger_samples;         //!< Number of samples that are pretrigger
   uint32_t readout_time;               //!< CPU time of readout, seconds
