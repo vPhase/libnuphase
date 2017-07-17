@@ -13,9 +13,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h> 
-#include <arpa/inet.h> 
 #include <signal.h>
+#include <inttypes.h>
 #include <errno.h> 
+#include <endian.h>
 
 #define NP_ADDRESS_MAX 128 
 #define NP_SPI_BYTES  NP_WORD_SIZE
@@ -23,6 +24,7 @@
 #define NP_NUM_REGISTER 128
 #define BUF_MASK 0xf
 #define MAX_PRETRIGGER 8 
+#define BOARD_CLOCK_HZ 7500000
 
 #define SPI_CAST  (uintptr_t) 
 
@@ -42,6 +44,16 @@ typedef enum
   REG_CHIPID_MID = 0x05,  
   REG_CHIPID_HI = 0x06,  
   REG_SCALER_READ = 0x07, 
+  REG_EVENT_COUNTER_LOW = 0xa, 
+  REG_EVENT_COUNTER_HIGH = 0xb, 
+  REG_TRIG_COUNTER_LOW = 0xc, 
+  REG_TRIG_COUNTER_HIGH = 0xd, 
+  REG_TRIG_TIME_LOW = 0xe, 
+  REG_TRIG_TIME_HIGH = 0xf, 
+  REG_DEADTIME = 0x10, 
+  REG_TRIG_INFO = 0x11,  //bits 23-22 : event buffer ; bits16-15: trig type ; bits 14-0: last beam trigger
+  REG_TRIG_MASKS = 0x12,  // bits 22-15 : channel mask ; bits 14-0 : beam mask
+  REG_BEAM_POWER= 0x14,   // add beam to get right register
   REG_UPDATE_SCALERS = 0x28, 
   REG_PICK_SCALER = 0x29, 
   REG_CALPULSE=0x2a, //cal pulse
@@ -56,7 +68,9 @@ typedef enum
   REG_CLEAR=0x4d, //clear buffers 
   REG_BUFFER=0x4e,
   REG_TRIGGER_MASK =0x50, 
-  REG_THRESHOLDS= 0x56 // add the threshold to this to get the right register
+  REG_THRESHOLDS= 0x56, // add the threshold to this to get the right register
+  REG_RESET_COUNTER = 0x7e, 
+  REG_RESET_ALL= 0x7f 
 
 } nuphase_register_t; 
 
@@ -76,18 +90,22 @@ struct nuphase_dev
   int spi_fd; 
   int gpio_fd; 
   int enable_locking; 
-  uint64_t event_number; 
+  uint64_t event_number_offset; 
+  uint64_t event_counter;  // should match device...we'll keep this to complain if it doesn't
   nuphase_config_t cfg; 
   uint16_t buffer_length; 
   pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
   pthread_mutex_t wait_mut; //mutex for the waiting. Only used if enable_locking is true
   uint8_t board_id; 
   volatile int cancel_wait; // needed for signal handlers 
-  volatile int waiting; 
+  struct timespec start_time; //the time of the last clock reset
   long waiting_thread;     // needed for signal handlers (if gpio is used) 
 }; 
 
 
+//some macros 
+#define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
+#define DONE(d)  if (d->enable_locking) pthread_mutex_unlock(&d->mut);
 
 // all possible buffers we might batch
 static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
@@ -101,6 +119,9 @@ static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES];
 
 static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
 static uint8_t buf_update_scalers[NP_SPI_BYTES] = {REG_UPDATE_SCALERS,0,0,1} ; 
+static uint8_t buf_reset[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1}; 
+static uint8_t buf_reset_counter[NP_SPI_BYTES] = {REG_RESET_COUNTER,0,0,1}; 
+static uint8_t buf_clear_all_masks[NP_SPI_BYTES] = {REG_TRIGGER_MASK,0,0,0xe}; 
 
 static void fillBuffers() __attribute__((constructor)); //this will fill them
 
@@ -185,8 +206,6 @@ static void init_xfers(int n, struct spi_ioc_transfer * xfers)
 
 
 
-#define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
-#define DONE(d)  if (d->enable_locking) pthread_mutex_unlock(&d->mut);
 
 static int setup_change_mode(struct spi_ioc_transfer * xfer, nuphase_readout_mode_t mode)
 {
@@ -228,6 +247,7 @@ static void xfer_buffer_init(struct xfer_buffer * b, int fd)
 
 static int xfer_buffer_send(struct xfer_buffer *b)
 {
+  if (!b->nused) return 0; 
   int success = ioctl(b->fd, SPI_IOC_MESSAGE(b->nused), b->spi); 
   if (!success) 
   {
@@ -239,11 +259,13 @@ static int xfer_buffer_send(struct xfer_buffer *b)
   return 0; 
 }
 
+
+
 // this will send if full!  
 static int xfer_buffer_append(struct xfer_buffer * b, const uint8_t * txbuf, const uint8_t * rxbuf) 
 {
   //check if full 
-  if (b->nused == 511) 
+  if (b->nused >= 511) //greater than just in case, but it already means something went horribly wrong 
   {
     if (xfer_buffer_send(b))
     {
@@ -257,6 +279,14 @@ static int xfer_buffer_append(struct xfer_buffer * b, const uint8_t * txbuf, con
   return 0; 
 }
 
+static int xfer_buffer_read_register(struct xfer_buffer * b, uint8_t address, uint8_t * result)
+{
+  int ret = 0; 
+  ret += xfer_buffer_append(b, buf_set_read_reg[address],0);
+  ret += xfer_buffer_append(b, buf_read,0);
+  ret += xfer_buffer_append(b,0,result); 
+  return ret; 
+}
 
 /* this will use up 13*naddr xfers.  MUST start on chunk 0 */ 
 static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
@@ -371,8 +401,8 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   dev = malloc(sizeof(nuphase_dev_t)); 
   dev->device_name = devicename; 
   dev->spi_fd =fd;
-  dev->waiting = 0; 
   dev->cancel_wait = 0; 
+  dev->event_counter = 0; 
 
   if (gpio) 
   {
@@ -391,6 +421,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
 
 
   //Configure the SPI protocol 
+  //TODO: need some checks here. 
   uint32_t speed = 10000000; //10 MHz 
   uint8_t mode = SPI_MODE_0; 
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
@@ -400,10 +431,9 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   //configuration 
   if (c) dev->cfg = *c; 
   else nuphase_config_init(&dev->cfg); 
-  nuphase_configure(dev, &dev->cfg); 
 
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
-  dev->event_number = ((uint64_t)time(0)) << 32; 
+  dev->event_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
   dev->board_id = board_id_counter++; 
 
@@ -415,11 +445,19 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
     pthread_mutex_init(&dev->wait_mut,0); 
   }
 
+  if (nuphase_reset(dev, &dev->cfg,0) ); 
+  {
+    fprintf(stderr,"Unable to reset device... "); 
+    nuphase_close(dev); 
+    return 0; 
+  }
+
   return dev; 
 }
 
 void nuphase_set_board_id(nuphase_dev_t * d, uint8_t id)
 {
+  if (id <= board_id_counter) board_id_counter = id+1; 
   d->board_id = id; 
 }
 
@@ -428,22 +466,15 @@ uint8_t nuphase_get_board_id(const nuphase_dev_t * d)
   return d->board_id; 
 }
 
-
-void nuphase_set_event_number(nuphase_dev_t * d, uint64_t number)
+void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset) 
 {
-  d->event_number = number; 
-  //TODO this will eventually set it on the board 
+  d->event_number_offset = offset; 
 }
+
 
 void nuphase_set_buffer_length(nuphase_dev_t * d, uint16_t length)
 {
   d->buffer_length = length; 
-}
-
-uint64_t nuphase_get_event_number(const nuphase_dev_t * d) 
-{
-  // this will be checked with the board on every read
-  return d->event_number; 
 }
 
 uint16_t nuphase_get_bufferlength(const nuphase_dev_t * d) 
@@ -484,8 +515,8 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
 
   //ver and date are going to be the wrong endianness, I think 
-  info->ver = ntohl(info->ver); 
-  info->date = ntohl(info->date); 
+  info->ver = be32toh(info->ver); 
+  info->date = be32toh(info->date); 
 
   return ret; 
 }
@@ -722,13 +753,13 @@ void nuphase_config_init(nuphase_config_t * c)
 }
 
 
-int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c) 
+int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force ) 
 {
   int written; 
   int ret = 0; 
   
   USING(d); 
-  if (c->pretrigger != d->cfg.pretrigger)
+  if (force || c->pretrigger != d->cfg.pretrigger)
   {
     uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, 0, c->pretrigger}; 
     written = write(d->spi_fd, pretrigger_buf, NP_SPI_BYTES); 
@@ -743,7 +774,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c)
     }
   }
 
-  if (c->channel_mask!= d->cfg.channel_mask)
+  if (force || c->channel_mask!= d->cfg.channel_mask)
   {
     uint8_t channel_mask_buf[]= { REG_PRETRIGGER, 0, 0, c->channel_mask}; 
     written = write(d->spi_fd, channel_mask_buf, NP_SPI_BYTES); 
@@ -758,7 +789,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c)
     }
   }
 
-  if (c->trigger_mask != d->cfg.trigger_mask)
+  if (force || c->trigger_mask != d->cfg.trigger_mask)
   {
     //TODO check the byte order
     uint8_t trigger_mask_buf[]= { REG_TRIGGER_MASK, 0, (c->trigger_mask >> 8) & 0xff, c->trigger_mask & 0xff}; 
@@ -774,7 +805,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c)
     }
   }
 
-  if (memcmp(c->trigger_thresholds, d->cfg.trigger_thresholds, sizeof(c->trigger_thresholds)))
+  if (force || memcmp(c->trigger_thresholds, d->cfg.trigger_thresholds, sizeof(c->trigger_thresholds)))
   {
     uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
     struct spi_ioc_transfer xfer[NP_NUM_BEAMS]; 
@@ -849,59 +880,157 @@ int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nu
 }
 
 
+/* for endianness */ 
+typedef union bignum 
+{
+      uint64_t u64; 
+      uint8_t u32[2]; 
+} bignum_t; 
+
+
+//lazy error checking macro 
+#define CHK(X) if (X) { ret++; goto the_end; } 
+
+
+
+
 int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nuphase_header_t ** hd, nuphase_event_t ** ev)
 {
-  int ibuf,ichan;
+  int ibuf,ichan,ibeam;
   int iout = 0; 
-  int ret; 
+  int ret = 0; 
   struct xfer_buffer xfers; 
   struct timespec now; 
-  clock_gettime(CLOCK_REALTIME, &now); 
   xfer_buffer_init(&xfers, d->spi_fd); 
-  USING(d); //hold the lock for the duration
+
+  // we need to store some stuff in an intermediate format 
+  // prior to putting into the header since the bits don't match 
+  bignum_t event_counter; 
+  bignum_t trig_counter; 
+  bignum_t trig_time; 
+  uint32_t deadtime; 
+  uint32_t tmask; 
+  uint32_t tinfo; 
+
+
   for (ibuf = 0; ibuf < NP_NUM_BUFFER; ibuf++)
   {
+    //we are not reading this event right now
     if ( (mask & (1 << ibuf)) == 0)
       continue; 
 
-    //TODO should probably add some error checks and stuff... 
+    clock_gettime(CLOCK_REALTIME, &now); 
+
+    //grab the metadata 
     //set the buffer 
-    ret+=xfer_buffer_append(&xfers, buf_buffer[ibuf],0); 
-    if (ret) goto the_end; 
+    USING(d); 
+    CHK(xfer_buffer_append(&xfers, buf_buffer[ibuf],0)) 
 
-    //TODO read metadata once that is fully implemented 
+    /**Grab metadata! */ 
+    //switch to register mode  
+    CHK(xfer_buffer_append(&xfers, buf_mode[MODE_REGISTER],0)) 
+
+    //we will pretend like we are bigendian so we can just call be64toh on the u65
+    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, &event_counter.u32[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_HIGH, &event_counter.u32[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_LOW, &trig_counter.u32[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_HIGH, &trig_counter.u32[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_LOW, &trig_time.u32[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_HIGH, &trig_time.u32[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_DEADTIME, (uint8_t*) &deadtime)) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
+    for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
+    {
+      CHK(xfer_buffer_read_register(&xfers, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
+    }
+    CHK(xfer_buffer_send(&xfers)); //flush the metadata 
     
-    hd[ibuf]->buffer_mask = mask; 
-    hd[ibuf]->buffer_length = d->buffer_length; 
-    hd[ibuf]->readout_time = now.tv_sec; 
-    hd[ibuf]->readout_time_ns = now.tv_nsec; 
-    hd[ibuf]->event_number = d->event_number; //this will be checked against hardware number! 
-    hd[ibuf]->board_id = d->board_id; 
-    ev[ibuf]->event_number = d->event_number; 
-    ev[ibuf]->buffer_length = d->buffer_length; 
-    ev[ibuf]->board_id = d->board_id; 
+    // check the event counter
+    event_counter.u64 = be64toh(event_counter.u64); 
 
-    ret+=xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS],0); 
-    if (ret) goto the_end; 
+
+    if (d->event_counter != event_counter.u64) 
+    {
+      fprintf(stderr,"Event counter mismatch!!! (sw: %"PRIu64", hw: %"PRIu64")\n", d->event_counter, event_counter.u64); 
+    }
+
+    //now fill in header data 
+    tinfo = be32toh(tinfo); 
+    tmask = be32toh(tmask); 
+
+    uint8_t hwbuf =  (tinfo >> 22) & 0x3; 
+    if ( hwbuf  != ibuf)
+    {
+      fprintf(stderr,"Buffer number mismatch!!! (sw: %u, hw: %u)\n", ibuf, hwbuf ); 
+    }
+    
+    hd[iout]->event_number = d->event_number_offset + event_counter.u64; 
+    hd[iout]->trig_number = be64toh(trig_counter.u64); 
+    hd[iout]->buffer_length = d->buffer_length; 
+    hd[iout]->pretrigger_samples = d->cfg.pretrigger* 8 * 16; //TODO define these constants somewhere
+    hd[iout]->readout_time = now.tv_sec; 
+    hd[iout]->readout_time_ns = now.tv_nsec; 
+    hd[iout]->trig_time = be64toh(trig_time.u64); 
+
+    hd[iout]->approx_trigger_time= d->start_time.tv_sec + trig_time.u64 / BOARD_CLOCK_HZ; 
+    hd[iout]->approx_trigger_time_nsecs = d->start_time.tv_nsec + (trig_time.u64 % BOARD_CLOCK_HZ) *(1.e9 / BOARD_CLOCK_HZ); 
+    if (hd[iout]->approx_trigger_time_nsecs > 1e9) 
+    {
+      hd[iout]->approx_trigger_time++; 
+      hd[iout]->approx_trigger_time_nsecs-=1e9; 
+    }
+
+    hd[iout]->triggered_beams = tinfo & 0x7fff; 
+    hd[iout]->beam_mask = tmask & 0x7fff;  
+    for (ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
+    {
+      hd[iout]->beam_power[ibeam] = be32toh(hd[iout]->beam_power[ibeam]); 
+
+    }
+    hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
+    hd[iout]->deadtime = be32toh(deadtime); 
+    hd[iout]->buffer_number = hwbuf; 
+    hd[iout]->channel_mask = (tmask >> 15) & 0xff; 
+    hd[iout]->channel_overflow = 0; //TODO not implemented yet 
+    hd[iout]->buffer_mask = mask; //this is the current buffer mask
+    hd[iout]->board_id = d->board_id; 
+
+
+    d->event_counter++; 
+
+
+    //and some event data 
+    ev[iout]->buffer_length = d->buffer_length; 
+    ev[iout]->board_id = d->board_id; 
+
+
+    //now start to read the data 
+    //switch to waveform mode
+    CHK(xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS],0))
+
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
-      ret+=xfer_buffer_append(&xfers, buf_channel[ichan],0); 
-      if (ret) goto the_end; 
-
-      ret+=loop_over_chunks_half_duplex(&xfers, hd[ibuf]->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[ibuf]->data[ichan]); 
+      if (hd[iout]->channel_mask & (1 << ichan)) //TODO is this backwards?!??? 
+      {
+        CHK(xfer_buffer_append(&xfers, buf_channel[ichan],0)) 
+        CHK(loop_over_chunks_half_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[iout]->data[ichan]))
+      }
+      else
+      {
+        memset(ev[iout]->data[ichan], 0 , hd[iout]->buffer_length); 
+      }
     }
-    ret+=xfer_buffer_append(&xfers, buf_clear[1 << ibuf],0); 
-    if (ret) goto the_end; 
-
-    ret+=xfer_buffer_send(&xfers); //flush so we can clear the buffer immediately 
-    if (ret) goto the_end; 
+    CHK(xfer_buffer_append(&xfers, buf_clear[1 << ibuf],0))
+    CHK(xfer_buffer_send(&xfers)) //flush so we can clear the buffer immediately 
 
     iout++; 
+    DONE(d); //give othe rthings a chance to use the lock 
   }
 
-  the_end:
 
-  DONE(d); 
+  the_end:
+  //TODO add some printout here in case of falure/ 
 
   return ret; 
 }
@@ -983,4 +1112,101 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
   return 0; 
 }
 
+//todo there is probably a simpler way to calculate this... 
+static struct timespec avg_time(struct timespec A, struct timespec B)
+{
+  struct timespec avg; 
+  avg.tv_nsec = (A.tv_nsec + B.tv_nsec) /2; 
+  uint32_t tmp_sum = A.tv_sec + B.tv_sec; 
+  avg.tv_sec = tmp_sum/2; 
+  if (tmp_sum % 2 == 1 ) 
+  {
+    avg.tv_nsec += 5e8; 
+  }
+
+  if (avg.tv_nsec > 1e9) 
+  {
+    avg.tv_sec++; 
+    avg.tv_nsec-=1e9; 
+  }
+
+  return avg; 
+}
+
+
+int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, int hard_reset)
+{
+  
+  int wrote; 
+  if (hard_reset) 
+  {
+    wrote = write(d->spi_fd, buf_reset, NP_ADDRESS_MAX); 
+    if (wrote != NP_SPI_BYTES) 
+    {
+      return 1;
+    }
+    fprintf(stderr,"Full reset...\n"); 
+    //we need to sleep for a while. how about 20 seconds? 
+    sleep(20); 
+    fprintf(stderr,"...done\n"); 
+  }
+  else
+  {
+
+    // our reset sequence will be: 
+    //
+    //   1) clear the beam masks to allow no triggers
+    //   2) clear the buffers
+    //   3) reset the counters (and try to estimate the time that we did that) 
+    //   ??? 
+    //   r) write the configuration 
+    //
+    // I don't think we need to bother doing this quickly since this will happen very rarely.
+
+    //start by clearing the masks 
+    wrote = write( d->spi_fd, buf_clear_all_masks,NP_SPI_BYTES);
+
+    if (wrote != NP_SPI_BYTES) 
+    {
+      fprintf(stderr, "Unable to clear masks. Aborting reset\n"); 
+      return 1; 
+    }
+
+    //clear all buffers
+    wrote = write  (d->spi_fd, buf_clear[0xf], NP_SPI_BYTES); 
+
+    if (wrote != NP_SPI_BYTES) 
+    {
+      fprintf(stderr, "Unable to clear buffers. Aborting reset\n"); 
+      return 1; 
+    }
+
+
+    //then reset the counters, measuring the time before and after 
+   
+    struct timespec tbefore; 
+    struct timespec tafter; 
+    clock_gettime(CLOCK_REALTIME,&tbefore); 
+    wrote = write(d->spi_fd, buf_reset_counter, NP_SPI_BYTES); 
+    clock_gettime(CLOCK_REALTIME,&tafter); 
+
+    
+    
+
+    if (wrote != NP_SPI_BYTES) 
+    {
+      fprintf(stderr, "Unable to reset counters. Aborting reset\n"); 
+      return 1; 
+    }
+
+    //take average for the start time
+    d->start_time = avg_time(tbefore,tafter); 
+
+
+
+    //TODO any calibration necessary here?
+
+  }
+  return nuphase_configure(d,c,1); 
+}
 

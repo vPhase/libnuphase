@@ -35,7 +35,7 @@
 #define NP_MAX_WAVEFORM_LENGTH 2048  
 
 /** The number of trigger beams available */ 
-#define NP_NUM_BEAMS 16 
+#define NP_NUM_BEAMS 15 
 
 /** Error codes for read/write */ 
 typedef enum 
@@ -67,19 +67,22 @@ typedef enum nuphase_trigger_type
 typedef struct nuphase_header 
 {
   uint64_t event_number;               //!< the event number assigned to this event. Will match the event body. 
-  uint64_t trig_number;                //!< the trigger number assigned to this event. If there is deadtime, this will diverge from event_number. 
+  uint64_t trig_number;                //!< the sequential (since reset) trigger number assigned to this event. 
   uint16_t buffer_length;              //!< the buffer length. Stored both here and in the event. 
   uint16_t pretrigger_samples;         //!< Number of samples that are pretrigger
   uint32_t readout_time;               //!< CPU time of readout, seconds
   uint32_t readout_time_ns;            //!< CPU time of readout, nanoseconds 
-  uint64_t trig_time;                  //!< Board trigger time
+  uint64_t trig_time;                  //!< Board trigger time (raw units) 
+  uint32_t approx_trigger_time;   //!< Board trigger time converted to real units (approx secs) 
+  uint32_t approx_trigger_time_nsecs;   //!< Board trigger time converted to real units (approx nnsecs) 
   uint16_t triggered_beams;            //!< The beams that triggered 
   uint16_t beam_mask;                  //!< The enabled beams
-  uint32_t beam_power[NP_NUM_CHAN];    //!< The power in each beam at the trigger time
+  uint32_t beam_power[NP_NUM_BEAMS];    //!< The power in each beam at the trigger time
   nuphase_trig_type_t trig_type;       //!< The trigger type? 
   uint32_t deadtime;                   //!< ??? Will we have this available? If so, this will be a fraction
   uint8_t buffer_number;               //!< the buffer number (do we need this?) 
   uint8_t channel_mask;                //!< The enabled channels  
+  uint8_t channel_overflow;            //!< Bitmask of channels that overflowed the 5 bits 
   uint8_t buffer_mask;                 //!< The buffer mask at time of read out (do we want this?)   
   uint8_t board_id;                   //!< The board number assigned at startup. 
 } nuphase_header_t; 

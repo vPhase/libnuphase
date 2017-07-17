@@ -69,14 +69,16 @@ typedef struct nuphase_fwinfo
  * https://yurovsky.github.io/2014/10/10/linux-uio-gpio-interrupt/) to know
  * when data is available without polling. 
  *
- * Optionally, a mutex can be created to help synchornize access to this device
+ * If that turns out to be too slow, I guess we can write a kernel driver. 
+ *
+ * Optionally, a mutex can be created to help synchronize access to this device
  * from multiple threads. 
  *
  * For now, the device handle also keeps track of the board id, buffer length
- * and the event number. On initialization, the board id is set to the next
+ * and the event number offset. On initialization, the board id is set to the next
  * available id, buffer length is set to the default amount (624 samples) and
  * the event number is set to unixtime << 32. They can be set to something
- * better using nuphase_set_board_id, nuphase_set_buffer_length and nuphase_set_event_number.
+ * better using nuphase_set_board_id, nuphase_set_buffer_length and nuphase_set_event_number_offset.
  *
  * The default nuphase_config_t is also sent on startup. Changes can be made
  * using nuphase_configure. 
@@ -84,35 +86,58 @@ typedef struct nuphase_fwinfo
  * The access to the SPI file descriptor is locked when opening, so only one
  * process can hold it. 
  *
- * If that turns out to be too slow, I guess we can write a kernel driver. 
  *
- * @param spi_device_name The SPI device (likely something like
- * /sys/bus/spi/devices/spi1.0 ) @param gpio_interrupt_device_name The GPIO
- * device acting as an interrupt (e.g. /dev/uio0). This is purely optional, if
- * not defined, we will busy wait.  @param cfg          If non-zero, this
- * config is used instead of the default initial one.  @param lock_access  If
- * 1, a mutex will be initialized that will control concurrent access to this
- * device from multiple threads @returns a pointer to the file descriptor, or 0
- * if something went wrong. 
+ * @param spi_device_name The SPI device (likely something like /sys/bus/spi/devices/spi1.0 )
+ *
+ * @param gpio_interrupt_device_name The GPIO device acting as an interrupt (e.g. /dev/uio0).
+ *                                    This is purely optional, if not defined, we will busy wait. 
+ *
+ * @param cfg    If non-zero, this config is used instead of the default initial one.
+ * @param lock_access  If non-zero a mutex will be initialized that will control concurrent access to this
+ *
+ * device from multiple threads 
+ *
+ * @returns a pointer to the file descriptor, or 0 if something went wrong. 
  */
-nuphase_dev_t * nuphase_open(const char * spi_device_name, const char *
-    gpio_interrupt_device_name, const nuphase_config_t * cfg, int lock_access); 
+nuphase_dev_t * nuphase_open(const char * spi_device_name,
+                             const char * gpio_interrupt_device_name, 
+                             const nuphase_config_t * cfg,
+                             int lock_access); 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
 
-/**Set the event number for the device */
-void nuphase_set_event_number(nuphase_dev_t * d, uint64_t number) ;
-
-/**Retrieve the event number for the current event */
-uint64_t nuphase_get_event_number(const nuphase_dev_t * d) ; 
-
 /**Set the board id for the device */
 void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
 
+
+/** Set the event number offset. Currently DOES NOT reset the counter
+ * on the board (only done on nuphase_open / nuphase_reset). 
+ *
+ * This means you must run this either right after open or reset and before reading any buffers
+ * for you to get something sensible.  
+ * @param d board handle
+ * @param offset the offset to set
+ *
+ **/ 
+void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset); 
+
+/** Sends a board reset. I think this clears the buffers / counters / etc. 
+ *
+ * Currently there is no way to just reset the event counter because I haven't
+ * figured out how to do that without race conditions.  (It would involve
+ * something like setting the trigger mask to all, clearing the buffers,
+ * resetting the counter and undoing the trigger mask, which is effectively a
+ * full reset anyway but slower). 
+ *
+ * @param d the board to reset
+ * @param c the config to send right after resetting (unlike nuphase_open, this is not initialized to default if null and will result in a crash) . 
+ * @param hard_reset if non-zero this will do a full reset instead of a partial reset 
+ */
+int nuphase_reset(nuphase_dev_t *d, const nuphase_config_t * c, int hard_reset); 
+
 /**Retrieve the board id for the current event */
 uint8_t nuphase_get_board_id(const nuphase_dev_t * d) ; 
-
 
 
 /** Set the length of the readout buffer. Can be anything between 0 and 2048. (default is 624). */ 
@@ -163,8 +188,10 @@ int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo);
 
 /** Sends config to the board. The config is stuff like pretrigger threshold, 
  * Note that it's possible this may not take effect on the immediate next buffer. 
+ *
+ * @param force reconfigure even if matches current value by board (mostly useful internally) 
  * */ 
-int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config); 
+int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config, int force); 
 
 
 
