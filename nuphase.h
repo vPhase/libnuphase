@@ -51,8 +51,9 @@ NP_ERR_BAD_VERSION      = 0xbadbeef  //!< version number not understood
 /**  Trigger types */ 
 typedef enum nuphase_trigger_type 
 {
-  NP_TRIG_RF,    //!< triggered by input wavecforms
+  NP_TRIG_NONE,   //<! Triggered by nothing (should never happen but if it does it's a bad sign1) 
   NP_TRIG_SW,    //!< triggered by software (force trigger)  
+  NP_TRIG_RF,    //!< triggered by input wavecforms
   NP_TRIG_EXT    //!< triggered by external trigger 
 } nuphase_trig_type_t; 
 
@@ -61,30 +62,35 @@ typedef enum nuphase_trigger_type
  * STILL PRELIMINARY 
  *
  * On-disk layout is different and opaque, you must use nuphase_header_read() / nuphase_header_write() to write
- * to disk./ 
+ * to disk 
+ *
+ * I refrained from reducing the number of bits for various things because they will presumably get compressed away anyway. 
+ *
+ * If not, we can do that in the conversion to the on-disk format. 
  *
  */
 typedef struct nuphase_header 
 {
-  uint64_t event_number;               //!< the event number assigned to this event. Will match the event body. 
-  uint64_t trig_number;                //!< the sequential (since reset) trigger number assigned to this event. 
-  uint16_t buffer_length;              //!< the buffer length. Stored both here and in the event. 
-  uint16_t pretrigger_samples;         //!< Number of samples that are pretrigger
-  uint32_t readout_time;               //!< CPU time of readout, seconds
-  uint32_t readout_time_ns;            //!< CPU time of readout, nanoseconds 
-  uint64_t trig_time;                  //!< Board trigger time (raw units) 
-  uint32_t approx_trigger_time;   //!< Board trigger time converted to real units (approx secs) 
-  uint32_t approx_trigger_time_nsecs;   //!< Board trigger time converted to real units (approx nnsecs) 
-  uint16_t triggered_beams;            //!< The beams that triggered 
-  uint16_t beam_mask;                  //!< The enabled beams
-  uint32_t beam_power[NP_NUM_BEAMS];    //!< The power in each beam at the trigger time
-  nuphase_trig_type_t trig_type;       //!< The trigger type? 
-  uint32_t deadtime;                   //!< ??? Will we have this available? If so, this will be a fraction
-  uint8_t buffer_number;               //!< the buffer number (do we need this?) 
-  uint8_t channel_mask;                //!< The enabled channels  
-  uint8_t channel_overflow;            //!< Bitmask of channels that overflowed the 5 bits 
-  uint8_t buffer_mask;                 //!< The buffer mask at time of read out (do we want this?)   
-  uint8_t board_id;                   //!< The board number assigned at startup. 
+  uint64_t event_number;                         //!< the event number assigned to this event. Will match the event body. 
+  uint64_t trig_number;                          //!< the sequential (since reset) trigger number assigned to this event. 
+  uint16_t buffer_length;                        //!< the buffer length. Stored both here and in the event. 
+  uint16_t pretrigger_samples;                   //!< Number of samples that are pretrigger
+  uint32_t readout_time;                         //!< CPU time of readout, seconds
+  uint32_t readout_time_ns;                      //!< CPU time of readout, nanoseconds 
+  uint64_t trig_time;                            //!< Board trigger time (raw units) 
+  uint32_t approx_trigger_time;                  //!< Board trigger time converted to real units (approx secs) 
+  uint32_t approx_trigger_time_nsecs;            //!< Board trigger time converted to real units (approx nnsecs) 
+  uint16_t triggered_beams;                         //!< The beams that triggered 
+  uint16_t beam_mask;                            //!< The enabled beams
+  uint32_t beam_power[NP_NUM_BEAMS];             //!< The power in each beam at the trigger time
+  uint32_t deadtime;                             //!< ??? Will we have this available? If so, this will be a fraction
+  uint8_t buffer_number;                         //!< the buffer number (do we need this?) 
+  uint8_t channel_mask;                          //!< The enabled channels  
+  uint8_t channel_overflow;                      //!< Bitmask of channels that overflowed the 5 bits 
+  uint8_t buffer_mask;                           //!< The buffer mask at time of read out (do we want this?)   
+  uint8_t board_id;                              //!< The board number assigned at startup. 
+  nuphase_trig_type_t trig_type;                 //!< The trigger type? 
+  uint8_t calpulser;                             //!< Was the calpulser on? 
 } nuphase_header_t; 
 
 /**nuphase event body.
