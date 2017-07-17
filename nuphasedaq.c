@@ -182,7 +182,7 @@ void fillBuffers()
   }
 
   memset(buf_pick_scaler,0,sizeof(buf_pick_scaler)); 
-  for (i = 0; i < (1 << NP_NUM_BEAMS); i++)
+  for (i = 0; i < NP_NUM_BEAMS; i++)
   {
     buf_pick_scaler[i][0]=REG_PICK_SCALER; 
     buf_pick_scaler[i][3]=i;  
