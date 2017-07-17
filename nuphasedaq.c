@@ -51,7 +51,7 @@ typedef enum
   REG_TRIG_TIME_LOW = 0xe, 
   REG_TRIG_TIME_HIGH = 0xf, 
   REG_DEADTIME = 0x10, 
-  REG_TRIG_INFO = 0x11,  //bits 23-22 : event buffer ; bits16-15: trig type ; bits 14-0: last beam trigger
+  REG_TRIG_INFO = 0x11,  //bits 23-22 : event buffer ; bit 21: calpulse, bits 19-17: pretrig window,  bits16-15: trig type ; bits 14-0: last beam trigger
   REG_TRIG_MASKS = 0x12,  // bits 22-15 : channel mask ; bits 14-0 : beam mask
   REG_BEAM_POWER= 0x14,   // add beam to get right register
   REG_UPDATE_SCALERS = 0x28, 
@@ -119,7 +119,9 @@ static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES];
 
 static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
 static uint8_t buf_update_scalers[NP_SPI_BYTES] = {REG_UPDATE_SCALERS,0,0,1} ; 
-static uint8_t buf_reset[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1}; 
+static uint8_t buf_reset_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1}; 
+static uint8_t buf_reset_almost_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,2}; 
+static uint8_t buf_reset_adc[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,4}; 
 static uint8_t buf_reset_counter[NP_SPI_BYTES] = {REG_RESET_COUNTER,0,0,1}; 
 static uint8_t buf_clear_all_masks[NP_SPI_BYTES] = {REG_TRIGGER_MASK,0,0,0xe}; 
 
@@ -445,7 +447,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
     pthread_mutex_init(&dev->wait_mut,0); 
   }
 
-  if (nuphase_reset(dev, &dev->cfg,0) ); 
+  if (nuphase_reset(dev, &dev->cfg,NP_RESET_COUNTERS) ); 
   {
     fprintf(stderr,"Unable to reset device... "); 
     nuphase_close(dev); 
@@ -988,14 +990,14 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       hd[iout]->beam_power[ibeam] = be32toh(hd[iout]->beam_power[ibeam]); 
 
     }
-    hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
     hd[iout]->deadtime = be32toh(deadtime); 
     hd[iout]->buffer_number = hwbuf; 
     hd[iout]->channel_mask = (tmask >> 15) & 0xff; 
     hd[iout]->channel_overflow = 0; //TODO not implemented yet 
     hd[iout]->buffer_mask = mask; //this is the current buffer mask
     hd[iout]->board_id = d->board_id; 
-
+    hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
+    hd[iout]->calpulser = (tinfo >> 21) & 0x1; 
 
     d->event_counter++; 
 
@@ -1134,13 +1136,14 @@ static struct timespec avg_time(struct timespec A, struct timespec B)
 }
 
 
-int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, int hard_reset)
+int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t reset_type)
 {
   
   int wrote; 
-  if (hard_reset) 
+  
+  if (reset_type == NP_RESET_ALMOST_GLOBAL) 
   {
-    wrote = write(d->spi_fd, buf_reset, NP_ADDRESS_MAX); 
+    wrote = write(d->spi_fd, buf_reset_all, NP_SPI_BYTES); 
     if (wrote != NP_SPI_BYTES) 
     {
       return 1;
@@ -1150,63 +1153,81 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, int hard_reset)
     sleep(20); 
     fprintf(stderr,"...done\n"); 
   }
-  else
+  else if (reset_type == NP_RESET_ALMOST_GLOBAL)
+  {
+    wrote = write(d->spi_fd, buf_reset_almost_all, NP_SPI_BYTES); 
+    if (wrote != NP_SPI_BYTES) 
+    {
+      return 1;
+    }
+    fprintf(stderr,"Almost full reset...\n"); 
+    //we need to sleep for a while. how about 20 seconds? 
+    sleep(20); 
+    fprintf(stderr,"...done\n"); 
+  }
+
+  if (reset_type == NP_RESET_ADC)
+  {
+    wrote = write(d->spi_fd, buf_reset_adc, NP_SPI_BYTES); 
+    if (wrote != NP_SPI_BYTES) 
+    {
+      return 1;
+    }
+    sleep(10); // ? 
+  }
+
+  //TODO do ADC recalibration. 
+  if (reset_type >= NP_RESET_ADC)
   {
 
-    // our reset sequence will be: 
-    //
-    //   1) clear the beam masks to allow no triggers
-    //   2) clear the buffers
-    //   3) reset the counters (and try to estimate the time that we did that) 
-    //   ??? 
-    //   r) write the configuration 
-    //
-    // I don't think we need to bother doing this quickly since this will happen very rarely.
 
-    //start by clearing the masks 
-    wrote = write( d->spi_fd, buf_clear_all_masks,NP_SPI_BYTES);
 
-    if (wrote != NP_SPI_BYTES) 
-    {
+  }
+
+  /* afer all resets, we want to restart the event counter 
+   * (i.e. a NP_RESET_COUNTER is implicit with all other resets) 
+   
+   **/
+
+  //start by clearing the masks 
+  wrote = write( d->spi_fd, buf_clear_all_masks,NP_SPI_BYTES);
+
+  if (wrote != NP_SPI_BYTES) 
+  {
       fprintf(stderr, "Unable to clear masks. Aborting reset\n"); 
       return 1; 
-    }
+  }
 
-    //clear all buffers
-    wrote = write  (d->spi_fd, buf_clear[0xf], NP_SPI_BYTES); 
+  //clear all buffers
+  wrote = write  (d->spi_fd, buf_clear[0xf], NP_SPI_BYTES); 
 
-    if (wrote != NP_SPI_BYTES) 
-    {
+  if (wrote != NP_SPI_BYTES) 
+  {
       fprintf(stderr, "Unable to clear buffers. Aborting reset\n"); 
       return 1; 
-    }
+  }
 
 
-    //then reset the counters, measuring the time before and after 
+  //then reset the counters, measuring the time before and after 
    
-    struct timespec tbefore; 
-    struct timespec tafter; 
-    clock_gettime(CLOCK_REALTIME,&tbefore); 
-    wrote = write(d->spi_fd, buf_reset_counter, NP_SPI_BYTES); 
-    clock_gettime(CLOCK_REALTIME,&tafter); 
-
-    
+   struct timespec tbefore; 
+   struct timespec tafter; 
+   clock_gettime(CLOCK_REALTIME,&tbefore); 
+   wrote = write(d->spi_fd, buf_reset_counter, NP_SPI_BYTES); 
+   clock_gettime(CLOCK_REALTIME,&tafter); 
     
 
-    if (wrote != NP_SPI_BYTES) 
-    {
+   if (wrote != NP_SPI_BYTES) 
+   {
       fprintf(stderr, "Unable to reset counters. Aborting reset\n"); 
       return 1; 
-    }
+   }
 
     //take average for the start time
     d->start_time = avg_time(tbefore,tafter); 
 
 
-
-    //TODO any calibration necessary here?
-
-  }
-  return nuphase_configure(d,c,1); 
+   //finally we must configure it the way we like it 
+   return nuphase_configure(d,c,1); 
 }
 

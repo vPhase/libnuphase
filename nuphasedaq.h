@@ -42,6 +42,7 @@ typedef struct nuphase_config
 {
  uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
  uint16_t trigger_mask;                     //!< Which triggers to use, default is all (0xffffff) 
+ uint8_t  attenuation[NP_NUM_CHAN];         //!   
  uint8_t  channel_mask;                     //!< Which channels to use, default is all (0xff)
  uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 85 samples)  (3 bits);  
 } nuphase_config_t; 
@@ -57,6 +58,15 @@ typedef struct nuphase_fwinfo
   uint32_t date; //!< firmware date
   uint64_t dna;  //!< board dna 
 } nuphase_fwinfo_t; 
+
+
+typedef enum nuphase_reset_type 
+{
+  NP_RESET_COUNTERS, //!< resets event number / trig number / trig time only 
+  NP_RESET_ADC,      //!< resets and recalibrates ADC 
+  NP_RESET_ALMOST_GLOBAL, //!< everything but register settings 
+  NP_RESET_GLOBAL    //! everything
+} nuphase_reset_t; 
 
 
 /** \brief Open a nuphase phased array board and initializes it. 
@@ -122,6 +132,7 @@ void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
  **/ 
 void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset); 
 
+
 /** Sends a board reset. I think this clears the buffers / counters / etc. 
  *
  * Currently there is no way to just reset the event counter because I haven't
@@ -132,9 +143,10 @@ void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset);
  *
  * @param d the board to reset
  * @param c the config to send right after resetting (unlike nuphase_open, this is not initialized to default if null and will result in a crash) . 
- * @param hard_reset if non-zero this will do a full reset instead of a partial reset 
+ * @param type The type of reset to do. See the documentation for nuphase_reset_t 
+ * @returns 0 on success
  */
-int nuphase_reset(nuphase_dev_t *d, const nuphase_config_t * c, int hard_reset); 
+int nuphase_reset(nuphase_dev_t *d, const nuphase_config_t * c, nuphase_reset_t type); 
 
 /**Retrieve the board id for the current event */
 uint8_t nuphase_get_board_id(const nuphase_dev_t * d) ; 
