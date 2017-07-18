@@ -447,7 +447,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
     pthread_mutex_init(&dev->wait_mut,0); 
   }
 
-  if (nuphase_reset(dev, &dev->cfg,NP_RESET_COUNTERS) ); 
+  if (nuphase_reset(dev, &dev->cfg,NP_RESET_COUNTERS)) 
   {
     fprintf(stderr,"Unable to reset device... "); 
     nuphase_close(dev); 
