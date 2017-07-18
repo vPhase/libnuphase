@@ -1,6 +1,6 @@
 CC=gcc
 LD=gcc
-CFLAGS+=-fPIC -g -Wall
+CFLAGS+=-fPIC -g -Wall -Wextra
 LDFLAGS+= -lpthread -lz 
 
 PREFIX=/usr/local/ 
