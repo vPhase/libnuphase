@@ -106,6 +106,7 @@ struct nuphase_dev
   pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
   pthread_mutex_t wait_mut; //mutex for the waiting. Only used if enable_locking is true
   uint8_t board_id; 
+  uint8_t channel_read_mask;// read mask... right now it's always 0xf, but we can make it configurable later
   volatile int cancel_wait; // needed for signal handlers 
   struct timespec start_time; //the time of the last clock reset
   long waiting_thread;     // needed for signal handlers (if gpio is used) 
@@ -139,7 +140,7 @@ static uint8_t buf_reset_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1};
 static uint8_t buf_reset_almost_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,2}; 
 static uint8_t buf_reset_adc[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,4}; 
 static uint8_t buf_reset_counter[NP_SPI_BYTES] = {REG_RESET_COUNTER,0,0,1}; 
-static uint8_t buf_clear_all_masks[NP_SPI_BYTES] = {REG_TRIGGER_MASK,0,0,0xe}; 
+static uint8_t buf_clear_all_masks[NP_SPI_BYTES] = {REG_TRIGGER_MASK,0,0,0x0}; 
 static uint8_t buf_adc_clk_rst[NP_SPI_BYTES] = {REG_ADC_CLK_RST,0,0,0}; 
 static uint8_t buf_apply_attenuator[NP_SPI_BYTES] = {REG_ATTEN_APPLY,0,0,0}; 
 
@@ -456,6 +457,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->event_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
+  dev->channel_read_mask = 0xf; 
   dev->board_id = board_id_counter++; 
 
   dev->enable_locking = locking; 
@@ -767,10 +769,17 @@ void nuphase_config_init(nuphase_config_t * c)
   int i;
   c->channel_mask = 0xff; 
   c->pretrigger = 1; //?? 
-  c->trigger_mask = 0xfff; 
+  c->trigger_mask = 0x7f; 
 
   for (i = 0; i < NP_NUM_BEAMS; i++)
+  {
     c->trigger_thresholds[i] = 0xfffff;  //TODO make this more sensible by default 
+  }
+
+  for (i = 0; i < NP_NUM_CHAN; i++)
+  {
+    c->attenuation[i] = 0;  //TODO make this more sensible by default 
+  }
 }
 
 
@@ -797,7 +806,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
 
   if (force || c->channel_mask!= d->cfg.channel_mask)
   {
-    uint8_t channel_mask_buf[]= { REG_PRETRIGGER, 0, 0, c->channel_mask}; 
+    uint8_t channel_mask_buf[]= { REG_CHANNEL_MASK, 0, 0, c->channel_mask}; 
     written = write(d->spi_fd, channel_mask_buf, NP_SPI_BYTES); 
     if (written == NP_SPI_BYTES) 
     {
@@ -993,7 +1002,10 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     {
       CHK(xfer_buffer_read_register(&xfers, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
     }
-    CHK(xfer_buffer_send(&xfers)); //flush the metadata 
+    //flush the metadata .  we could get slightly faster throughput by storing metadata 
+    //read locations for each buffer and not flushing.
+    // If it ends up mattering, I'll change it. 
+    CHK(xfer_buffer_send(&xfers)); 
     
     // check the event counter
     event_counter.u64 = be64toh(event_counter.u64); 
@@ -1060,7 +1072,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
-      if (hd[iout]->channel_mask & (1 << ichan)) //TODO is this backwards?!??? 
+      if (d->channel_read_mask & (1 << ichan)) //TODO is this backwards?!??? 
       {
         CHK(xfer_buffer_append(&xfers, buf_channel[ichan],0)) 
         CHK(loop_over_chunks_half_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[iout]->data[ichan]))
@@ -1185,13 +1197,21 @@ static struct timespec avg_time(struct timespec A, struct timespec B)
 
 
 
-
+/*  this has slowly grown into a bit of a monstrosity, since it is responsible 
+ *  for all the different reset modes. 
+ *
+ *
+ */
 int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t reset_type)
 {
   
   int wrote; 
+
+  // We start by tickling the right reset register
+  // if we are doing a global, almost global or ADC reset. 
+  // We need to verify that these sleep delays are good.
   
-  if (reset_type == NP_RESET_ALMOST_GLOBAL) 
+  if (reset_type == NP_RESET_GLOBAL) 
   {
     wrote = write(d->spi_fd, buf_reset_all, NP_SPI_BYTES); 
     if (wrote != NP_SPI_BYTES) 
@@ -1226,8 +1246,17 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
     sleep(10); // ? 
   }
 
-  /* afer all resets, we want to restart the event counter 
-   * (i.e. a NP_RESET_COUNTER is implicit with all other resets) 
+  /* afer all resets (if applicable), we want to restart the event counter 
+   * and, if any of the stronger resets were applied, apply the calibration. 
+   *
+   * The order of operations is: 
+   *
+   *  - turn off all trigger masks
+   *  - clear allthe buffers 
+   *  - if necessary, do the calibration 
+   *  - reset the event / trig time counters (and save the time to try to match it up later) 
+   *  - call nuphase_configure with the passed config. 
+   *  
    
    **/
 
@@ -1251,12 +1280,26 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
 
 
   //do the calibration, if necessary 
+  
+  /* The calibration proceeds as follows:
+   *   - temporarily set the channel length to something long 
+   *   - enable the calpulser 
+   *   - until we are happy:  
+   *      - send software trigger
+   *      - read event
+   *      - find peak value of each channel
+   *      - make sure peak values are at least some size and not farther than 16
+   *      - if all good, set delays accordingly 
+   *
+   *   disable the cal pulser
+   */
   if (reset_type >= NP_RESET_ADC)
   {
     int happy = 0; 
     int misery = 0; 
-    int wrote = NP_SPI_BYTES; 
+    wrote = NP_SPI_BYTES; 
 
+    //temporarily set the buffer length to the maximum 
     uint16_t old_buf_length = d->buffer_length; 
     d->buffer_length = NP_MAX_WAVEFORM_LENGTH; 
 
@@ -1301,7 +1344,6 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
         fprintf(stderr,"that's odd, we should only have one buffer. Mask is : 0x%x\n", mask); 
       }
 
-      //temporarily set the buffer length to the maximum 
 
       //read in the first buffer (should really be  0 most of the time.) 
       nuphase_read_single(d, __builtin_ctz(mask),  &d->calib_hd, &d->calib_ev); 
