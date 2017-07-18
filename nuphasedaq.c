@@ -35,7 +35,7 @@
 
 #define POLL_USLEEP 1000 
 
-#define DEBUG_PRINTOUTS 1 
+//#define DEBUG_PRINTOUTS 1 
 
 
 //register map 
@@ -131,7 +131,7 @@ static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer)
   printf("START BULK TRANSFER\n"); 
   for (i = 0; i < n; i++)
   {
-      printf("XFR %03d\t",i); 
+      printf("\tXFR %03d\t",i); 
       if (xfer[i].tx_buf)
       {
         uint8_t * tx = (uint8_t*) SPI_CAST xfer[i].tx_buf; 
@@ -140,7 +140,7 @@ static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer)
       if (xfer[i].rx_buf) 
       {
         uint8_t * rx = (uint8_t*) SPI_CAST xfer[i].rx_buf; 
-        printf("rx [%x,%x,%x,%x]\t", rx[0],rx[1],rx[2],rx[3]); 
+        printf("RX [%x,%x,%x,%x]\t", rx[0],rx[1],rx[2],rx[3]); 
       }
       printf("\n"); 
   }
@@ -820,7 +820,7 @@ void nuphase_config_init(nuphase_config_t * c)
   int i;
   c->channel_mask = 0xff; 
   c->pretrigger = 1; //?? 
-  c->trigger_mask = 0x7f; 
+  c->trigger_mask = 0x7fff; 
 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
@@ -1039,13 +1039,13 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     //switch to register mode  
     CHK(xfer_buffer_append(&xfers, buf_mode[MODE_REGISTER],0)) 
 
-    //we will pretend like we are bigendian so we can just call be64toh on the u65
-    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, &event_counter.u32[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_HIGH, &event_counter.u32[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_LOW, &trig_counter.u32[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_HIGH, &trig_counter.u32[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_LOW, &trig_time.u32[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_HIGH, &trig_time.u32[0])) 
+    //we will pretend like we are bigendian so we can just call be64toh on the u64
+    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, &event_counter.u32[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_HIGH, &event_counter.u32[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_LOW, &trig_counter.u32[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_HIGH, &trig_counter.u32[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_LOW, &trig_time.u32[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_HIGH, &trig_time.u32[1])) 
     CHK(xfer_buffer_read_register(&xfers,REG_DEADTIME, (uint8_t*) &deadtime)) 
     CHK(xfer_buffer_read_register(&xfers,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
     CHK(xfer_buffer_read_register(&xfers,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
