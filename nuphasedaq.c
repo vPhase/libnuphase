@@ -35,6 +35,8 @@
 
 #define POLL_USLEEP 1000 
 
+#define DEBUG_PRINTOUTS 1 
+
 
 //register map 
 typedef enum
@@ -118,6 +120,53 @@ struct nuphase_dev
 
 
 }; 
+
+//Wrappers for io functions to add printouts 
+static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer) 
+{
+  int ret = ioctl(fd,SPI_IOC_MESSAGE(n), xfer); 
+
+#ifdef DEBUG_PRINTOUTS
+  int i; 
+  printf("START BULK TRANSFER\n"); 
+  for (i = 0; i < n; i++)
+  {
+      printf("XFR %03d\t",i); 
+      if (xfer[i].tx_buf)
+      {
+        uint8_t * tx = (uint8_t*) SPI_CAST xfer[i].tx_buf; 
+        printf("TX [%x,%x,%x,%x]\t", tx[0],tx[1],tx[2],tx[3]); 
+      }
+      if (xfer[i].rx_buf) 
+      {
+        uint8_t * rx = (uint8_t*) SPI_CAST xfer[i].rx_buf; 
+        printf("rx [%x,%x,%x,%x]\t", rx[0],rx[1],rx[2],rx[3]); 
+      }
+      printf("\n"); 
+  }
+  printf("END BULK TRANSFER\n"); 
+#endif 
+  return ret; 
+}
+
+static int do_write(int fd, const uint8_t * p)
+{
+  int ret = write(fd,p, NP_SPI_BYTES); 
+#ifdef DEBUG_PRINTOUTS
+  printf("WRITE: [%x %x %x %x]\n", p[0],p[1],p[2],p[3]); 
+#endif
+  return ret; 
+}
+
+static int do_read(int fd, uint8_t * p)
+{
+  int ret = read(fd,p, NP_SPI_BYTES); 
+#ifdef DEBUG_PRINTOUTS
+  printf("READ: [%x %x %x %x]\n", p[0],p[1],p[2],p[3]); 
+#endif
+  return ret; 
+}
+
 
 
 //some macros 
@@ -266,11 +315,13 @@ static void xfer_buffer_init(struct xfer_buffer * b, int fd)
 }
 
 
+
+
 static int xfer_buffer_send(struct xfer_buffer *b)
 {
   int wrote; 
   if (!b->nused) return 0; 
-  wrote = ioctl(b->fd, SPI_IOC_MESSAGE(b->nused), b->spi); 
+  wrote = do_xfer(b->fd, b->nused, b->spi); 
   if (wrote < b->nused * NP_SPI_BYTES) 
   {
     fprintf(stderr,"IOCTL failed! returned: %d\n",wrote); 
@@ -370,7 +421,7 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
   setup_change_mode(xfer, MODE_REGISTER); 
   setup_read_register(xfer+1, address,result); 
   USING(d); 
-  wrote= ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer); 
+  wrote= do_xfer(d->spi_fd, 4, xfer); 
   DONE(d);
   return wrote < 4 * NP_SPI_BYTES; 
 }
@@ -381,7 +432,7 @@ int nuphase_sw_trigger(nuphase_dev_t * d )
   uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, 1};  
   int ret; 
   USING(d); 
-  ret = write(d->spi_fd, buf, NP_SPI_BYTES); 
+  ret = do_write(d->spi_fd, buf); 
   DONE(d); 
   return ret == NP_SPI_BYTES ? 0 : -1;  
 }
@@ -391,7 +442,7 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state)
   uint8_t buf[4] = { REG_CALPULSE, 0,0, state & 0xff };  
   int ret;
   USING(d); 
-  ret = write(d->spi_fd, buf, NP_SPI_BYTES); 
+  ret = do_write(d->spi_fd, buf); 
   DONE(d); 
   return ret == NP_SPI_BYTES ? 0 : 1 ;
 }
@@ -444,7 +495,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
 
   //Configure the SPI protocol 
   //TODO: need some checks here. 
-  uint32_t speed = 10000000; //10 MHz 
+  uint32_t speed = 5000000; //10 MHz 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
   ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
@@ -527,7 +578,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
 
 
   USING(d); 
-  wrote = ioctl(d->spi_fd, SPI_IOC_MESSAGE(16), xfers); 
+  wrote = do_xfer(d->spi_fd, 16, xfers); 
   DONE(d); 
 
 
@@ -792,7 +843,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   if (force || c->pretrigger != d->cfg.pretrigger)
   {
     uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, 0, c->pretrigger}; 
-    written = write(d->spi_fd, pretrigger_buf, NP_SPI_BYTES); 
+    written = do_write(d->spi_fd, pretrigger_buf); 
     if (written == NP_SPI_BYTES) 
     {
       d->cfg.pretrigger = c->pretrigger; 
@@ -807,7 +858,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   if (force || c->channel_mask!= d->cfg.channel_mask)
   {
     uint8_t channel_mask_buf[]= { REG_CHANNEL_MASK, 0, 0, c->channel_mask}; 
-    written = write(d->spi_fd, channel_mask_buf, NP_SPI_BYTES); 
+    written = do_write(d->spi_fd, channel_mask_buf); 
     if (written == NP_SPI_BYTES) 
     {
       d->cfg.channel_mask = c->channel_mask; 
@@ -823,7 +874,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   {
     //TODO check the byte order
     uint8_t trigger_mask_buf[]= { REG_TRIGGER_MASK, 0, (c->trigger_mask >> 8) & 0xff, c->trigger_mask & 0xff}; 
-    written = write(d->spi_fd, trigger_mask_buf, NP_SPI_BYTES); 
+    written = do_write(d->spi_fd, trigger_mask_buf); 
     if (written == NP_SPI_BYTES) 
     {
       d->cfg.trigger_mask = c->trigger_mask; 
@@ -849,7 +900,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
       thresholds_buf[i][3]= c->trigger_thresholds[i] & 0xff;
       xfer[i].tx_buf =  SPI_CAST &thresholds_buf[i][0]; 
     }
-    if(ioctl(d->spi_fd, SPI_IOC_MESSAGE(NP_NUM_BEAMS), xfer) == NP_NUM_BEAMS * NP_SPI_BYTES)
+    if(do_xfer(d->spi_fd, NP_NUM_BEAMS, xfer) == NP_NUM_BEAMS * NP_SPI_BYTES)
     {
       //success! 
       memcpy(d->cfg.trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
@@ -875,7 +926,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
     xfer[2].tx_buf = SPI_CAST attenuation_078; 
     xfer[3].tx_buf = SPI_CAST buf_apply_attenuator; 
 
-    if (ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer)  == 4 * NP_SPI_BYTES)
+    if (do_xfer(d->spi_fd, 4, xfer)  == 4 * NP_SPI_BYTES)
     {
       //success! 
       memcpy(d->cfg.attenuation, c->attenuation, sizeof(c->attenuation)); 
@@ -998,6 +1049,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     CHK(xfer_buffer_read_register(&xfers,REG_DEADTIME, (uint8_t*) &deadtime)) 
     CHK(xfer_buffer_read_register(&xfers,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
     CHK(xfer_buffer_read_register(&xfers,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
+
     for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
     {
       CHK(xfer_buffer_read_register(&xfers, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
@@ -1006,6 +1058,14 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     //read locations for each buffer and not flushing.
     // If it ends up mattering, I'll change it. 
     CHK(xfer_buffer_send(&xfers)); 
+
+#ifdef DEBUG_PRINTOUTS
+    printf("Raw tinfo: %x\n", tinfo) ;
+    printf("Raw tmask: %x\n", tmask) ;
+    printf("Raw event_counter: %llx\n", event_counter.u64) ;
+    printf("Raw trig_counter: %llx\n", trig_counter.u64) ;
+    printf("Raw trig_time: %llx\n", trig_time.u64) ;
+#endif 
     
     // check the event counter
     event_counter.u64 = be64toh(event_counter.u64); 
@@ -1101,7 +1161,7 @@ int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask)
 {
   int ret; 
   USING(d); 
-  ret = write(d->spi_fd, buf_clear[mask & BUF_MASK], NP_SPI_BYTES); //TODO check if this is really the right interface 
+  ret = do_write(d->spi_fd, buf_clear[mask & BUF_MASK]); //TODO check if this is really the right interface 
   DONE(d); 
   return ret == NP_SPI_BYTES ? 0 : -1; 
 }
@@ -1110,7 +1170,7 @@ int nuphase_write(nuphase_dev_t *d, const uint8_t* buffer)
 {
   int written = 0; 
   USING(d); 
-  written = write(d->spi_fd, buffer,NP_SPI_BYTES); 
+  written = do_write(d->spi_fd, buffer); 
   DONE(d); 
   return written == NP_SPI_BYTES ? 0 : -1; 
 }
@@ -1119,7 +1179,7 @@ int nuphase_read(nuphase_dev_t *d,uint8_t* buffer)
 {
   int got = 0; 
   USING(d); 
-  got = read(d->spi_fd, buffer,NP_SPI_BYTES); 
+  got = do_read(d->spi_fd, buffer); 
   DONE(d); 
   return got == NP_SPI_BYTES ? 0 : -1; 
 }
@@ -1157,7 +1217,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
 
   clock_gettime(CLOCK_REALTIME, &now); 
   USING(d); 
-  wrote = ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), xfers); 
+  wrote = do_xfer(d->spi_fd, nxfers, xfers); 
   DONE(d); 
 
   if (wrote < 0) return wrote; 
@@ -1213,7 +1273,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
   
   if (reset_type == NP_RESET_GLOBAL) 
   {
-    wrote = write(d->spi_fd, buf_reset_all, NP_SPI_BYTES); 
+    wrote = do_write(d->spi_fd, buf_reset_all); 
     if (wrote != NP_SPI_BYTES) 
     {
       return 1;
@@ -1225,7 +1285,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
   }
   else if (reset_type == NP_RESET_ALMOST_GLOBAL)
   {
-    wrote = write(d->spi_fd, buf_reset_almost_all, NP_SPI_BYTES); 
+    wrote = do_write(d->spi_fd, buf_reset_almost_all); 
     if (wrote != NP_SPI_BYTES) 
     {
       return 1;
@@ -1238,7 +1298,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
 
   if (reset_type == NP_RESET_ADC)
   {
-    wrote = write(d->spi_fd, buf_reset_adc, NP_SPI_BYTES); 
+    wrote = do_write(d->spi_fd, buf_reset_adc); 
     if (wrote != NP_SPI_BYTES) 
     {
       return 1;
@@ -1261,7 +1321,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
    **/
 
   //start by clearing the masks 
-  wrote = write( d->spi_fd, buf_clear_all_masks,NP_SPI_BYTES);
+  wrote = do_write( d->spi_fd, buf_clear_all_masks);
 
   if (wrote != NP_SPI_BYTES) 
   {
@@ -1310,7 +1370,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
     {
       if (misery++ > 0) 
       {
-        wrote = write(d->spi_fd, buf_adc_clk_rst, NP_SPI_BYTES); 
+        wrote = do_write(d->spi_fd, buf_adc_clk_rst); 
         fprintf(stderr,"When adc_clk_rst, expected %d got %d\n", NP_SPI_BYTES, wrote);  
       }
 
@@ -1395,7 +1455,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
       {
         uint8_t delay  = (max_i[2*iadc] + max_i[2*iadc+1]- 2*min_max_i)/2; 
         uint8_t buf[NP_SPI_BYTES] = {REG_ADC_DELAYS + iadc, 0, 0, delay}; 
-        wrote = write(REG_ADC_DELAYS + iadc, buf, NP_SPI_BYTES); 
+        wrote = do_write(d->spi_fd, buf); 
         if (wrote < NP_SPI_BYTES) 
         {
           fprintf(stderr,"Should have written %d but wrote %d\n", NP_SPI_BYTES, wrote); 
@@ -1418,7 +1478,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
    struct timespec tbefore; 
    struct timespec tafter; 
    clock_gettime(CLOCK_REALTIME,&tbefore); 
-   wrote = write(d->spi_fd, buf_reset_counter, NP_SPI_BYTES); 
+   wrote = do_write(d->spi_fd, buf_reset_counter); 
    clock_gettime(CLOCK_REALTIME,&tafter); 
     
 
