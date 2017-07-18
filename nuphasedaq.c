@@ -26,6 +26,9 @@
 #define MAX_PRETRIGGER 8 
 #define BOARD_CLOCK_HZ 7500000
 
+#define MIN_GOOD_MAX_V 20 
+#define MAX_MISERY 25 
+
 #define SPI_CAST  (uintptr_t) 
 
 #define NP_DELAY_USECS 0
@@ -58,6 +61,12 @@ typedef enum
   REG_PICK_SCALER = 0x29, 
   REG_CALPULSE=0x2a, //cal pulse
   REG_CHANNEL_MASK=0x30, 
+  REG_ATTEN_012 = 0x32, 
+  REG_ATTEN_345 = 0x33, 
+  REG_ATTEN_67 = 0x34, 
+  REG_ATTEN_APPLY = 0x35, 
+  REG_ADC_CLK_RST = 0x37,  
+  REG_ADC_DELAYS = 0x38, //add buffer number to get all 
   REG_READ=0x47, //send data to spi miso 
   REG_FORCE_TRIG=0x40, 
   REG_CHANNEL=0x41, //select channel to read
@@ -100,6 +109,13 @@ struct nuphase_dev
   volatile int cancel_wait; // needed for signal handlers 
   struct timespec start_time; //the time of the last clock reset
   long waiting_thread;     // needed for signal handlers (if gpio is used) 
+
+  // store event / header used for calibration here in case we want it later? 
+ 
+  nuphase_event_t calib_ev; 
+  nuphase_header_t calib_hd; 
+
+
 }; 
 
 
@@ -124,6 +140,8 @@ static uint8_t buf_reset_almost_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,2};
 static uint8_t buf_reset_adc[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,4}; 
 static uint8_t buf_reset_counter[NP_SPI_BYTES] = {REG_RESET_COUNTER,0,0,1}; 
 static uint8_t buf_clear_all_masks[NP_SPI_BYTES] = {REG_TRIGGER_MASK,0,0,0xe}; 
+static uint8_t buf_adc_clk_rst[NP_SPI_BYTES] = {REG_ADC_CLK_RST,0,0,0}; 
+static uint8_t buf_apply_attenuator[NP_SPI_BYTES] = {REG_ATTEN_APPLY,0,0,0}; 
 
 static void fillBuffers() __attribute__((constructor)); //this will fill them
 
@@ -249,11 +267,12 @@ static void xfer_buffer_init(struct xfer_buffer * b, int fd)
 
 static int xfer_buffer_send(struct xfer_buffer *b)
 {
+  int wrote; 
   if (!b->nused) return 0; 
-  int success = ioctl(b->fd, SPI_IOC_MESSAGE(b->nused), b->spi); 
-  if (!success) 
+  wrote = ioctl(b->fd, SPI_IOC_MESSAGE(b->nused), b->spi); 
+  if (wrote < b->nused * NP_SPI_BYTES) 
   {
-    fprintf(stderr,"IOCTL failed!\n"); 
+    fprintf(stderr,"IOCTL failed! returned: %d\n",wrote); 
     return -1; 
   }
   b->nused = 0; 
@@ -344,15 +363,15 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 {
 
   struct spi_ioc_transfer xfer[4]; 
-  int ret;
+  int wrote; 
   if (address > NP_ADDRESS_MAX) return -1; 
   init_xfers(4,xfer); 
   setup_change_mode(xfer, MODE_REGISTER); 
   setup_read_register(xfer+1, address,result); 
   USING(d); 
-  ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer); 
+  wrote= ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer); 
   DONE(d);
-  return ret; 
+  return wrote < 4 * NP_SPI_BYTES; 
 }
 
 
@@ -425,7 +444,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   //Configure the SPI protocol 
   //TODO: need some checks here. 
   uint32_t speed = 10000000; //10 MHz 
-  uint8_t mode = SPI_MODE_0; 
+  uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
   ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
 
@@ -490,7 +509,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
 
   //we need to read 5 registers, so 15 xfers 
   struct spi_ioc_transfer xfers[16]; 
-  int ret; 
+  int wrote; 
 
   uint8_t dna_low[4]; 
   uint8_t dna_mid[4]; 
@@ -506,7 +525,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
 
 
   USING(d); 
-  ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(16), xfers); 
+  wrote = ioctl(d->spi_fd, SPI_IOC_MESSAGE(16), xfers); 
   DONE(d); 
 
 
@@ -520,7 +539,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   info->ver = be32toh(info->ver); 
   info->date = be32toh(info->date); 
 
-  return ret; 
+  return wrote < 16 * NP_SPI_BYTES; 
 }
 
 
@@ -821,7 +840,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
       thresholds_buf[i][3]= c->trigger_thresholds[i] & 0xff;
       xfer[i].tx_buf =  SPI_CAST &thresholds_buf[i][0]; 
     }
-    if(!ioctl(d->spi_fd, SPI_IOC_MESSAGE(NP_NUM_BEAMS), xfer))
+    if(ioctl(d->spi_fd, SPI_IOC_MESSAGE(NP_NUM_BEAMS), xfer) == NP_NUM_BEAMS * NP_SPI_BYTES)
     {
       //success! 
       memcpy(d->cfg.trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
@@ -831,6 +850,34 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
       ret =-1; 
       goto configure_end; 
     }
+  }
+
+  if (force || memcmp(c->attenuation, d->cfg.attenuation, sizeof(c->attenuation)))
+  {
+
+    struct spi_ioc_transfer xfer[4]; 
+    uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, c->attenuation[2], c->attenuation[1], c->attenuation[0] }; //TODO check order 
+    uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_012, c->attenuation[5], c->attenuation[4], c->attenuation[3] }; //TODO check order 
+    uint8_t attenuation_078[NP_SPI_BYTES] = { REG_ATTEN_012, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
+
+
+    xfer[0].tx_buf = SPI_CAST attenuation_012; 
+    xfer[1].tx_buf = SPI_CAST attenuation_345; 
+    xfer[2].tx_buf = SPI_CAST attenuation_078; 
+    xfer[3].tx_buf = SPI_CAST buf_apply_attenuator; 
+
+    if (ioctl(d->spi_fd, SPI_IOC_MESSAGE(4), xfer)  == 4 * NP_SPI_BYTES)
+    {
+      //success! 
+      memcpy(d->cfg.attenuation, c->attenuation, sizeof(c->attenuation)); 
+
+    }
+    else
+    {
+      ret = -1; 
+      goto configure_end; 
+    }
+
   }
 
   configure_end: 
@@ -1070,9 +1117,9 @@ int nuphase_read(nuphase_dev_t *d,uint8_t* buffer)
 int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st) 
 {
   //TODO: fill in deadtime when I figure out how. 
-  int ret; 
   int ixfer = 0; 
   int i; 
+  int wrote; 
   struct timespec now; 
   uint8_t wide_scalers[NP_NUM_BEAMS][NP_SPI_BYTES]; 
 
@@ -1098,10 +1145,10 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
 
   clock_gettime(CLOCK_REALTIME, &now); 
   USING(d); 
-  ret = ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), xfers); 
+  wrote = ioctl(d->spi_fd, SPI_IOC_MESSAGE(nxfers), xfers); 
   DONE(d); 
 
-  if (!ret) return ret; 
+  if (wrote < 0) return wrote; 
 
   st->deadtime = 0; //TODO 
   for (i = 0; i < NP_NUM_BEAMS; i++) 
@@ -1134,6 +1181,9 @@ static struct timespec avg_time(struct timespec A, struct timespec B)
 
   return avg; 
 }
+
+
+
 
 
 int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t reset_type)
@@ -1176,14 +1226,6 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
     sleep(10); // ? 
   }
 
-  //TODO do ADC recalibration. 
-  if (reset_type >= NP_RESET_ADC)
-  {
-
-
-
-  }
-
   /* afer all resets, we want to restart the event counter 
    * (i.e. a NP_RESET_COUNTER is implicit with all other resets) 
    
@@ -1205,6 +1247,127 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
   {
       fprintf(stderr, "Unable to clear buffers. Aborting reset\n"); 
       return 1; 
+  }
+
+
+  //do the calibration, if necessary 
+  if (reset_type >= NP_RESET_ADC)
+  {
+    int happy = 0; 
+    int misery = 0; 
+    int wrote = NP_SPI_BYTES; 
+
+    uint16_t old_buf_length = d->buffer_length; 
+    d->buffer_length = NP_MAX_WAVEFORM_LENGTH; 
+
+    //release the calpulser 
+    nuphase_calpulse(d, 1); 
+
+    while (!happy) 
+    {
+      if (misery++ > 0) 
+      {
+        wrote = write(d->spi_fd, buf_adc_clk_rst, NP_SPI_BYTES); 
+        fprintf(stderr,"When adc_clk_rst, expected %d got %d\n", NP_SPI_BYTES, wrote);  
+      }
+
+      if (misery> 3) 
+      {
+        fprintf(stderr,"Misery now at %d\n", misery); 
+      }
+
+      if (misery > MAX_MISERY) 
+      {
+        fprintf(stderr,"Maximum misery reached. We can't take it anymore. Giving up on ADC alignment and not bothering to configure.\n"); 
+        break; 
+      }
+
+      if (wrote < NP_SPI_BYTES) continue; //try again if the write failed 
+
+
+      nuphase_buffer_mask_t mask; 
+      nuphase_sw_trigger(d); 
+      nuphase_wait(d,&mask,1); 
+      int nbuf = __builtin_popcount(mask); 
+
+      if (!nbuf)
+      {
+        fprintf(stderr,"no buffers ready after SW trigger... something's fishy. Trying again!\n"); 
+        continue; 
+      }
+
+      if (nbuf > 1) 
+      {
+        fprintf(stderr,"that's odd, we should only have one buffer. Mask is : 0x%x\n", mask); 
+      }
+
+      //temporarily set the buffer length to the maximum 
+
+      //read in the first buffer (should really be  0 most of the time.) 
+      nuphase_read_single(d, __builtin_ctz(mask),  &d->calib_hd, &d->calib_ev); 
+
+      // now loop over the samples and get the things we need 
+      uint16_t min_max_i = NP_MAX_WAVEFORM_LENGTH; 
+      uint16_t max_max_i = 0; 
+      uint8_t min_max_v = 255; 
+      uint16_t max_i[NP_NUM_CHAN] = {0}; 
+
+      //loop through and find where the maxes are
+      int ichan, isamp; 
+
+      for (ichan = 0; ichan <NP_NUM_CHAN; ichan++)
+      {
+        uint8_t max_v = 0; 
+        for (isamp = 0; isamp < NP_MAX_WAVEFORM_LENGTH; isamp++)
+        {
+          if ( d->calib_ev.data[ichan][isamp] > max_v)
+          {
+            max_v = d->calib_ev.data[ichan][isamp]; 
+            max_i[ichan] = isamp; 
+          }
+        }
+
+        if (max_i[ichan] < min_max_i) min_max_i = max_i[ichan]; 
+        if (max_i[ichan] > max_max_i)  max_max_i = max_i[ichan]; 
+        if (max_v < min_max_v)  min_max_v = max_v; 
+      }
+
+      //sanity checks 
+
+      if (min_max_v < MIN_GOOD_MAX_V) // TODO come up with a good value
+      {
+        fprintf(stderr,"Minimum Max V was %x. Did we get a pulse in each channel? \n",min_max_v) ;
+        continue; 
+      }
+
+      //too much delay 
+      if (max_max_i - min_max_i > 16) 
+      {
+        fprintf(stderr,"Maximum delay required is %d. Let's try again. \n",max_max_i - min_max_i) ;
+        continue; 
+      }
+
+      int iadc; 
+      //otherwise, we are in business! Take averages of channel for each adc
+      for (iadc = 0; iadc < NP_NUM_CHAN/2; iadc++)
+      {
+        uint8_t delay  = (max_i[2*iadc] + max_i[2*iadc+1]- 2*min_max_i)/2; 
+        uint8_t buf[NP_SPI_BYTES] = {REG_ADC_DELAYS + iadc, 0, 0, delay}; 
+        wrote = write(REG_ADC_DELAYS + iadc, buf, NP_SPI_BYTES); 
+        if (wrote < NP_SPI_BYTES) 
+        {
+          fprintf(stderr,"Should have written %d but wrote %d\n", NP_SPI_BYTES, wrote); 
+          continue;//why not? 
+        }
+      }
+
+     //yay
+      happy=1; 
+    }
+
+    d->buffer_length = old_buf_length; 
+    nuphase_calpulse(d, 0); 
+    if (!happy) return -1; 
   }
 
 
