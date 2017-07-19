@@ -31,9 +31,9 @@
 
 #define SPI_CAST  (uintptr_t) 
 
-#define NP_DELAY_USECS 1
+#define NP_DELAY_USECS 0
 
-#define POLL_USLEEP 1000 
+#define POLL_USLEEP 100
 #define SPI_CLOCK 10000000
 
 //#define DEBUG_PRINTOUTS 1 
@@ -220,7 +220,7 @@ void fillBuffers()
   for (i = 0; i < NP_NUM_CHAN; i++) 
   {
     buf_channel[i][0] = REG_CHANNEL; 
-    buf_channel[i][3] = i; 
+    buf_channel[i][3] = 1+i; 
   }
 
   memset(buf_buffer,0,sizeof(buf_buffer)); 
@@ -383,7 +383,7 @@ static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t nadd
       ret+= xfer_buffer_append(xfers, buf_read, 0); 
       if (ret) return ret; 
 
-      ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK * iaddr + ichunk * NP_SPI_BYTES); 
+      ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
       if (ret) return ret; 
     }
   }
@@ -509,7 +509,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->event_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
-  dev->channel_read_mask = 0xf; 
+  dev->channel_read_mask = 0xff; 
   dev->board_id = board_id_counter++; 
 
   dev->enable_locking = locking; 
