@@ -122,13 +122,13 @@ typedef struct nuphase_status
 
 
 /** print the status  prettily */
-int nuphase_print_status(FILE *f, const nuphase_status_t * st) ; 
+int nuphase_status_print(FILE *f, const nuphase_status_t * st) ; 
 
 /** print the header  prettily */
-int nuphase_print_header(FILE *f, const nuphase_header_t * h) ; 
+int nuphase_header_print(FILE *f, const nuphase_header_t * h) ; 
 
 /** print the event prettily. The separator character will be used to separate different fields so you can dump it into a spreadsheet or something */
-int nuphase_print_event(FILE *f, const nuphase_event_t * ev, char sep) ; 
+int nuphase_event_print(FILE *f, const nuphase_event_t * ev, char sep) ; 
 
 /** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
 int nuphase_header_write(FILE * f, const nuphase_header_t * h); 

@@ -18,7 +18,7 @@ int main(int nargs, char ** args)
 
   while (!nuphase_event_read(f,&ev))
   {
-      nuphase_print_event(stdout, &ev, ','); 
+      nuphase_event_print(stdout, &ev, ','); 
   }
 
   fclose(f); 

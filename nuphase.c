@@ -443,7 +443,7 @@ int nuphase_header_gzread(gzFile f, nuphase_header_t * h)
 
 /* pretty prints */ 
 
-int nuphase_print_status(FILE *f, const nuphase_status_t *st)
+int nuphase_status_print(FILE *f, const nuphase_status_t *st)
 {
   int i ; 
   struct tm  tim; 
@@ -462,7 +462,7 @@ int nuphase_print_status(FILE *f, const nuphase_status_t *st)
 static const char * trig_type_names[4]  = { "NONE", "SW", "RF" ,"EXT" } ; 
 
 
-int nuphase_print_header(FILE *f, const nuphase_header_t *hd)
+int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
 {
   int i; 
   struct tm  tim; 
@@ -499,7 +499,7 @@ int nuphase_print_header(FILE *f, const nuphase_header_t *hd)
 }
 
 
-int nuphase_print_event(FILE *f, const nuphase_event_t *ev, char sep)
+int nuphase_event_print(FILE *f, const nuphase_event_t *ev, char sep)
 {
   int ichan, isamp; 
   fprintf(f, "EVENT:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", sep,ev->event_number,sep,sep,ev->board_id, sep,sep,ev->buffer_length ); 

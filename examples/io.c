@@ -45,7 +45,7 @@ int main(int nargs, const char ** args)
   hd.calpulser = 0; 
 
 
-//  nuphase_print_header(stdout, &hd); 
+//  nuphase_header_print(stdout, &hd); 
 
 
   //fill a nonsene event
@@ -83,9 +83,9 @@ int main(int nargs, const char ** args)
   printf("memcmp(hd,hd2) returned: %d\n", memcmp(&hd, &hd2, sizeof(hd))); 
   printf("memcmp(ev,ev2) returned: %d\n", memcmp(&ev, &ev2, sizeof(ev))); 
 
-  nuphase_print_header(stdout, &hd2); 
-  nuphase_print_event(stdout, &ev,'\t'); 
-  nuphase_print_event(stdout, &ev2,'\t'); 
+  nuphase_header_print(stdout, &hd2); 
+  nuphase_event_print(stdout, &ev,'\t'); 
+  nuphase_event_print(stdout, &ev2,'\t'); 
 
 
   return 0; 

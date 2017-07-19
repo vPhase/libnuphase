@@ -20,7 +20,7 @@ int main(int nargs, char ** args)
 
   //no interrupt, no locking, default config, 
   dev = nuphase_open(args[1],0,0,0); 
-  not_ok = nuphase_read_status(dev, &status); 
+  not_ok = nuphase_print_status(dev, &status); 
   nuphase_close(dev); 
 
   if (not_ok)

@@ -18,7 +18,7 @@ int main(int nargs, char ** args)
 
   while (!nuphase_header_read(f,&hd))
   {
-    nuphase_print_header(stdout, &hd); 
+    nuphase_header_print(stdout, &hd); 
   }
 
   fclose(f); 
