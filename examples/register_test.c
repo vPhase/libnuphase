@@ -18,7 +18,7 @@ int main(int nargs, char ** args )
   }
 
   if (nargs > 2) 
-    n = atoi(args[3]); 
+    n = atoi(args[2]); 
 
 
   nuphase_dev_t * dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
