@@ -54,8 +54,19 @@ void nuphase_config_init(nuphase_config_t * c);
 /** Firmware info retrieved from board */ 
 typedef struct nuphase_fwinfo
 {
-  uint32_t ver;  //!< firmware version
-  uint32_t date; //!< firmware date
+  struct 
+  {
+    unsigned major : 4; 
+    unsigned minor : 4; 
+  } ver; 
+
+  struct
+  {
+    unsigned year : 12; 
+    unsigned month : 4; 
+    unsigned day : 5; 
+  } date;
+
   uint64_t dna;  //!< board dna 
 } nuphase_fwinfo_t; 
 

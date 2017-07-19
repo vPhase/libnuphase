@@ -29,8 +29,8 @@ int main(int nargs, char ** args)
   }
   else
   {
-    printf("FW VER: %u\n",fw.ver); 
-    printf("FW DATE: %u\n",fw.date); 
+    printf("FW VER: %u.%u\n",fw.ver.major, fw.ver.minor); 
+    printf("FW DATE: %u-%u-%u\n",fw.date.year, fw.date.month, fw.date.day); 
     printf("BOARD DNA: 0x %" PRIu64 "\n",fw.dna); 
   }
 

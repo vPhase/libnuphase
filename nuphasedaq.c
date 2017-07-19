@@ -564,34 +564,34 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   //we need to read 5 registers, so 15 xfers 
   struct spi_ioc_transfer xfers[16]; 
   int wrote; 
-
-  uint8_t dna_low[4]; 
-  uint8_t dna_mid[4]; 
-  uint8_t dna_hi[4]; 
+  uint8_t version[NP_SPI_BYTES];
+  uint8_t date[NP_SPI_BYTES];
+  uint8_t dna_low[NP_SPI_BYTES]; 
+  uint8_t dna_mid[NP_SPI_BYTES]; 
+  uint8_t dna_hi[NP_SPI_BYTES]; 
 
   init_xfers(16,xfers); 
   setup_change_mode(xfers, MODE_REGISTER); 
-  setup_read_register(xfers+1, REG_FIRMWARE_VER, (uint8_t*) &(info->ver)); 
-  setup_read_register(xfers+4, REG_FIRMWARE_DATE, (uint8_t*) &(info->date)); 
+  setup_read_register(xfers+1, REG_FIRMWARE_VER, version); 
+  setup_read_register(xfers+4, REG_FIRMWARE_DATE, date); 
   setup_read_register(xfers+7, REG_CHIPID_LOW, dna_low); 
   setup_read_register(xfers+10, REG_CHIPID_MID, dna_mid); 
   setup_read_register(xfers+13, REG_CHIPID_HI, dna_hi); 
 
-
   USING(d); 
   wrote = do_xfer(d->spi_fd, 16, xfers); 
   DONE(d); 
-
+  info->ver.major = version[3] & 0xf0; 
+  info->ver.minor = version[3] & 0x0f; 
+  info->date.day = version[3] & 0xff; 
+  info->date.month = version[2] & 0xf; 
+  info->date.year = (version[2] & 0xf0) + (version[1] << 8); 
 
   //TODO check this logic. not sure endianness is correct
-  uint64_t dna_low_big =  dna_low[0] | dna_low[1] << 8 || dna_low[2] << 8;
-  uint64_t dna_mid_big =  dna_mid[0] | dna_mid[1] << 8 || dna_mid[2] << 8;
-  uint64_t dna_hi_big =  dna_hi[0] | dna_hi[1] << 8 ;
+  uint64_t dna_low_big =  dna_low[3] | dna_low[2] << 8 || dna_low[1] << 8;
+  uint64_t dna_mid_big =  dna_mid[3] | dna_mid[2] << 8 || dna_mid[1] << 8;
+  uint64_t dna_hi_big =  dna_hi[3] | dna_hi[2] << 8 ;
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
-
-  //ver and date are going to be the wrong endianness, I think 
-  info->ver = be32toh(info->ver); 
-  info->date = be32toh(info->date); 
 
   return wrote < 16 * NP_SPI_BYTES; 
 }
