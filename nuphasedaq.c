@@ -31,9 +31,10 @@
 
 #define SPI_CAST  (uintptr_t) 
 
-#define NP_DELAY_USECS 0
+#define NP_DELAY_USECS 1
 
 #define POLL_USLEEP 1000 
+#define SPI_CLOCK 10000000
 
 //#define DEBUG_PRINTOUTS 1 
 
@@ -495,7 +496,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
 
   //Configure the SPI protocol 
   //TODO: need some checks here. 
-  uint32_t speed = 5000000; //10 MHz 
+  uint32_t speed = SPI_CLOCK; 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
   ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
@@ -1353,7 +1354,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
    *
    *   disable the cal pulser
    */
-  if (reset_type >= NP_RESET_ADC)
+  if (0 && reset_type >= NP_RESET_ADC)//temporar disable 
   {
     int happy = 0; 
     int misery = 0; 
