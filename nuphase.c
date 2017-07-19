@@ -1,6 +1,7 @@
 #include "nuphase.h" 
 
 #include <string.h>
+#include <inttypes.h>
 
 //these need to be incremented if the structs change incompatibly
 //and then generic_*_read must be updated to delegate appropriately. 
@@ -56,7 +57,7 @@ static int generic_read(struct generic_file gf, int n, void * buf)
   switch(gf.type)
   {
     case STDIO: 
-      return fread(buf,8,n, gf.handle.f); 
+      return fread(buf,1,n, gf.handle.f); 
     case ZLIB: 
       return gzread(gf.handle.gzf,buf,n); 
     default:
@@ -71,7 +72,7 @@ static int generic_write(struct generic_file gf, int n, const void * buf)
   switch(gf.type)
   {
     case STDIO: 
-      return fwrite(buf, 8,n,gf.handle.f); 
+      return fwrite(buf, 1,n,gf.handle.f); 
     case ZLIB: 
       return gzwrite(gf.handle.gzf,buf,n); 
     default:
@@ -235,7 +236,7 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
   }
 
   written = generic_write(gf, sizeof(ev->board_id), &ev->board_id); 
-  if (written != ev->board_id) 
+  if (written != sizeof(ev->board_id)) 
   {
       return NP_ERR_NOT_ENOUGH_BYTES; 
   }
@@ -447,13 +448,69 @@ int nuphase_print_status(FILE *f, const nuphase_status_t *st)
   int i ; 
   struct tm  tim; 
   char timstr[128]; 
-  gmtime_r((time_t*) &st->readout_time, &tim); 
-  strftime(timstr,sizeof(timstr), "%Y-%m-%d $H:%M:%S", &tim);  
+  time_t t = st->readout_time;
+  gmtime_r((time_t*) &t, &tim); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
   fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id, timstr, st->readout_time_ns); 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
     fprintf(f,"\tBEAM %d:  %u \n",i, st->scalers[i]); 
   }
+  return 0; 
+}
+
+static const char * trig_type_names[4]  = { "NONE", "SW", "RF" ,"EXT" } ; 
+
+
+int nuphase_print_header(FILE *f, const nuphase_header_t *hd)
+{
+  int i; 
+  struct tm  tim; 
+  time_t t; 
+  char timstr[128]; 
+
+  fprintf(f, "EVENT %"PRIu64"\n", hd->event_number ); 
+  fprintf(f, "\t%s TRIGGER\n", trig_type_names[hd->trig_type]); 
+  fprintf(f,  "\ttrig num: %"PRIu64" board: %d\n", hd->trig_number, hd->board_id); 
+  fprintf(f, "\tbuf len: %u ; pretrig: %u\n", hd->buffer_length, hd->pretrigger_samples); 
+  fprintf(f,"\tbuf num: %u, buf_mask: %x\n", hd->buffer_number, hd->buffer_mask); 
+  t = hd->readout_time;
+  gmtime_r((time_t*) &t, &tim); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+  fprintf(f, "\trdout time: %s.%09d UTC\n",timstr, hd->readout_time_ns); 
+  fprintf(f, "\ttrig time (raw): %"PRIu64"\n", hd->trig_time); 
+  t = hd->approx_trigger_time; 
+  gmtime_r((time_t*) &t, &tim); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+  fprintf(f, "\ttrig time (est.): %s.%09d UTC\n",timstr, hd->approx_trigger_time_nsecs); 
+  fprintf(f, "\ttrig beams: %x\n", hd->triggered_beams); 
+  fprintf(f, "\tenabld beams: %x\n", hd->beam_mask); 
+  fprintf(f, "\tbeam powers:\n") ; 
+  for (i = 0; i < NP_NUM_BEAMS; i++) 
+  {
+    fprintf(f,"\t\tB%02d: %u\n", i, hd->beam_power[i]); 
+  }
+  fprintf(f,"\tprev sec deadtime: %u\n", hd->deadtime); 
+  fprintf(f,"\tchannel_mask: %x\n", hd->channel_mask); 
+  fprintf(f,"\tcalpulser: %s\n", hd->calpulser ? "yes" : "no"); 
+  
+
+  return 0; 
+}
+
+
+int nuphase_print_event(FILE *f, const nuphase_event_t *ev, char sep)
+{
+  int ichan, isamp; 
+  fprintf(f, "EVENT:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", sep,ev->event_number,sep,sep,ev->board_id, sep,sep,ev->buffer_length ); 
+  for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
+  {
+    for (isamp = 0; isamp < ev->buffer_length; isamp++) 
+    {
+      fprintf(f, "%d%c", ev->data[ichan][isamp], isamp < ev->buffer_length - 1 ? sep : '\n'); 
+    }
+  }
+
   return 0; 
 }
 
