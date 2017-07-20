@@ -58,7 +58,7 @@ int main(int nargs, char ** args )
   nuphase_event_write(fev,&ev); 
 
   nuphase_header_print(stdout, &hd); 
-  nuphase_event_print(stdout, &ev, ','); 
+//  nuphase_event_print(stdout, &ev, ','); 
 
   nuphase_close(dev); 
   fclose(fhd); 
