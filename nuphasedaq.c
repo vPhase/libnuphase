@@ -125,11 +125,17 @@ struct nuphase_dev
 //Wrappers for io functions to add printouts 
 static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer) 
 {
+#ifdef DEBUG_PRINTOUTS
+  struct timespec start; 
+  struct timespec end; 
+  clock_gettime(CLOCK_REALTIME, &start) ; 
+#endif
   int ret = ioctl(fd,SPI_IOC_MESSAGE(n), xfer); 
 
 #ifdef DEBUG_PRINTOUTS
+  clock_gettime(CLOCK_REALTIME, &end) ; 
   int i; 
-  printf("START BULK TRANSFER\n"); 
+  printf("START BULK TRANSFER (t = %lu.%lu)\n", start.tv_sec, start.tv_nsec); 
   for (i = 0; i < n; i++)
   {
       printf("\tXFR %03d\t",i); 
@@ -145,7 +151,7 @@ static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer)
       }
       printf("\n"); 
   }
-  printf("END BULK TRANSFER\n"); 
+  printf("END BULK TRANSFER (t= %lu.%lu)\n", end.tv_sec, end.tv_nsec); 
 #endif 
   return ret; 
 }
