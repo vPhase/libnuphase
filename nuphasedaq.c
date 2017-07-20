@@ -808,10 +808,10 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d) 
 {
 
-  uint8_t result; 
+  uint8_t result[NP_SPI_BYTES]; 
   nuphase_buffer_mask_t mask; 
-  nuphase_read_register(d, REG_STATUS, &result); 
-  mask  = result &  BUF_MASK; // only keep lower 4 bits. who knows what's in the other bits? 
+  nuphase_read_register(d, REG_STATUS, result); 
+  mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   return mask; 
 }
 
