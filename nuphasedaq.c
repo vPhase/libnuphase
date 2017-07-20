@@ -32,7 +32,7 @@
 #define SPI_CAST  (uintptr_t) 
 
 #define NP_DELAY_USECS 0
-#define NP_CS_CHANGE 0 
+#define NP_CS_CHANGE 0
 
 #define POLL_USLEEP 100
 #define SPI_CLOCK 10000000
@@ -1142,7 +1142,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       if (d->channel_read_mask & (1 << ichan)) //TODO is this backwards?!??? 
       {
         CHK(xfer_buffer_append(&xfers, buf_channel[ichan],0)) 
-        CHK(loop_over_chunks_half_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),0, ev[iout]->data[ichan]))
+        CHK(loop_over_chunks_half_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ichan]))
       }
       else
       {
