@@ -38,12 +38,15 @@ int main(int nargs, char ** args )
   if (sw_trigger) 
   {
       nuphase_sw_trigger(dev); 
-      usleep(100e3); 
   }
 
   struct timespec t0; 
   struct timespec t1; 
 
+  nuphase_buffer_mask_t mask; 
+  nuphase_wait(dev,&mask,1); 
+
+  printf("Mask after waiting: %x\n", mask); 
 
   clock_gettime(CLOCK_MONOTONIC,&t0); 
   nuphase_read_single(dev, 0,  &hd, &ev); 
