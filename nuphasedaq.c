@@ -587,11 +587,11 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   USING(d); 
   wrote = do_xfer(d->spi_fd, 16, xfers); 
   DONE(d); 
-  info->ver.major = version[3] & 0xf0; 
+  info->ver.major = version[3] >>4 ; 
   info->ver.minor = version[3] & 0x0f; 
-  info->date.day = version[3] & 0xff; 
-  info->date.month = version[2] & 0xf; 
-  info->date.year = (version[2] & 0xf0) + (version[1] << 8); 
+  info->date.day = date[3] & 0xff; 
+  info->date.month = date[2] & 0xf; 
+  info->date.year = (date[2] >> 4) + (date[1] << 4); 
 
   //TODO check this logic. not sure endianness is correct
   uint64_t dna_low_big =  dna_low[3] | dna_low[2] << 8 || dna_low[1] << 8;
