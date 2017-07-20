@@ -32,6 +32,7 @@
 #define SPI_CAST  (uintptr_t) 
 
 #define NP_DELAY_USECS 0
+#define NP_CS_CHANGE 0 
 
 #define POLL_USLEEP 100
 #define SPI_CLOCK 10000000
@@ -45,11 +46,11 @@ typedef enum
   REG_SET_READ_REG=0x00, 
   REG_FIRMWARE_VER=0x01, 
   REG_FIRMWARE_DATE=0x02, 
-  REG_STATUS = 0x03, 
+  REG_SCALER_READ = 0x03, 
   REG_CHIPID_LOW = 0x04,  
   REG_CHIPID_MID = 0x05,  
   REG_CHIPID_HI = 0x06,  
-  REG_SCALER_READ = 0x07, 
+  REG_STATUS = 0x07, 
   REG_EVENT_COUNTER_LOW = 0xa, 
   REG_EVENT_COUNTER_HIGH = 0xb, 
   REG_TRIG_COUNTER_LOW = 0xc, 
@@ -115,7 +116,6 @@ struct nuphase_dev
   long waiting_thread;     // needed for signal handlers (if gpio is used) 
 
   // store event / header used for calibration here in case we want it later? 
- 
   nuphase_event_t calib_ev; 
   nuphase_header_t calib_hd; 
 
@@ -142,12 +142,12 @@ static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer)
       if (xfer[i].tx_buf)
       {
         uint8_t * tx = (uint8_t*) SPI_CAST xfer[i].tx_buf; 
-        printf("TX [%x,%x,%x,%x]\t", tx[0],tx[1],tx[2],tx[3]); 
+        printf("TX [0x%02x 0x%02x 0x%02x 0x%02x]\t", tx[0],tx[1],tx[2],tx[3]); 
       }
       if (xfer[i].rx_buf) 
       {
         uint8_t * rx = (uint8_t*) SPI_CAST xfer[i].rx_buf; 
-        printf("RX [%x,%x,%x,%x]\t", rx[0],rx[1],rx[2],rx[3]); 
+        printf("RX [0x%02x 0x%02x 0x%02x 0x%02x]\t", rx[0],rx[1],rx[2],rx[3]); 
       }
       printf("\n"); 
   }
@@ -160,7 +160,7 @@ static int do_write(int fd, const uint8_t * p)
 {
   int ret = write(fd,p, NP_SPI_BYTES); 
 #ifdef DEBUG_PRINTOUTS
-  printf("WRITE: [%x %x %x %x]\n", p[0],p[1],p[2],p[3]); 
+  printf("WRITE: [0x%02x 0x%02x 0x%02x 0x%02x]\n", p[0],p[1],p[2],p[3]); 
 #endif
   return ret; 
 }
@@ -169,7 +169,7 @@ static int do_read(int fd, uint8_t * p)
 {
   int ret = read(fd,p, NP_SPI_BYTES); 
 #ifdef DEBUG_PRINTOUTS
-  printf("READ: [%x %x %x %x]\n", p[0],p[1],p[2],p[3]); 
+  printf("READ: [0x%02x 0x%02x 0x%02x 0x%02x]\n", p[0],p[1],p[2],p[3]); 
 #endif
   return ret; 
 }
@@ -276,7 +276,7 @@ static void init_xfers(int n, struct spi_ioc_transfer * xfers)
   for (i = 0; i < n; i++)
   {
     xfers[i].len = NP_SPI_BYTES; 
-    xfers[i].cs_change =0; //deactivate cs between transfers
+    xfers[i].cs_change =NP_CS_CHANGE; //deactivate cs between transfers
     xfers[i].delay_usecs = NP_DELAY_USECS; //? 
   }
 }
