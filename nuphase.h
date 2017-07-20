@@ -1,6 +1,10 @@
 #ifndef _nuphase_h
 #define _nuphase_h
 
+#ifdef __cplusplus
+extern "C" { 
+#endif
+
 /** \file nuphase.h 
  *
  * Include file for working with nuphase data. 
@@ -167,4 +171,7 @@ int nuphase_status_gzwrite(gzFile f, const nuphase_status_t * ev);
 int nuphase_status_gzread(gzFile f, nuphase_status_t * ev); 
 
 
+#ifdef __cplusplus
+}
+#endif
 #endif
