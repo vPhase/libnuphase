@@ -76,7 +76,7 @@ typedef enum nuphase_reset_type
   NP_RESET_COUNTERS, //!< resets event number / trig number / trig time only 
   NP_RESET_ADC,      //!< resets and recalibrates ADC 
   NP_RESET_ALMOST_GLOBAL, //!< everything but register settings 
-  NP_RESET_GLOBAL    //! everything
+  NP_RESET_GLOBAL    //! everything 
 } nuphase_reset_t; 
 
 
@@ -144,13 +144,7 @@ void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
 void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset); 
 
 
-/** Sends a board reset. I think this clears the buffers / counters / etc. 
- *
- * Currently there is no way to just reset the event counter because I haven't
- * figured out how to do that without race conditions.  (It would involve
- * something like setting the trigger mask to all, clearing the buffers,
- * resetting the counter and undoing the trigger mask, which is effectively a
- * full reset anyway but slower). 
+/** Sends a board reset. The reset type is specified by type. 
  *
  * @param d the board to reset
  * @param c the config to send right after resetting (unlike nuphase_open, this is not initialized to default if null and will result in a crash) . 
