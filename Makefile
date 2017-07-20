@@ -1,7 +1,10 @@
 CC=gcc
 LD=gcc
-CFLAGS+=-fPIC -g -Wall -Wextra
+CFLAGS+=-fPIC -g -Wall -Wextra -O2
 LDFLAGS+= -lpthread -lz 
+
+#uncomment to enable excessive printouts
+#CFLAGS+=-DDEBUG_PRINTOUTS
 
 PREFIX=/usr/local/ 
 LIBDIR=lib 
