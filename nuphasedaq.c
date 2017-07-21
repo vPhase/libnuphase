@@ -34,16 +34,15 @@
 #define NP_DELAY_USECS 0
 #define NP_CS_CHANGE 0
 
-#define POLL_USLEEP 100
+#define POLL_USLEEP 500
 #define SPI_CLOCK 10000000
 
 //#define DEBUG_PRINTOUTS 1 
 
-
 //register map 
 typedef enum
 {
-  REG_SET_READ_REG=0x00, 
+  REG_SET_READ_REG=0x6d, 
   REG_FIRMWARE_VER=0x01, 
   REG_FIRMWARE_DATE=0x02, 
   REG_SCALER_READ = 0x03, 
@@ -76,7 +75,7 @@ typedef enum
   REG_CHANNEL=0x41, //select channel to read
   REG_MODE=0x42, //readout mode
   REG_RAM_ADDR=0x45, //ram address
-  REG_CHUNK=0x49, //which 32-bit chunk 
+  REG_CHUNK=0x23, //which 32-bit chunk  + i 
   REG_PRETRIGGER=0x4c, 
   REG_CLEAR=0x4d, //clear buffers 
   REG_BUFFER=0x4e,
@@ -190,7 +189,8 @@ static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES]; 
 
-static uint8_t buf_read[NP_SPI_BYTES] = {REG_READ,0,0,0}; 
+static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
+
 static uint8_t buf_update_scalers[NP_SPI_BYTES] = {REG_UPDATE_SCALERS,0,0,1} ; 
 static uint8_t buf_reset_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1}; 
 static uint8_t buf_reset_almost_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,2}; 
@@ -247,8 +247,7 @@ void fillBuffers()
 
   for (i = 0; i < NP_NUM_CHUNK;i++)
   {
-    buf_chunk[i][0]=REG_CHUNK; 
-    buf_chunk[i][3] = i; 
+    buf_chunk[i][0]=REG_CHUNK+i; 
   }
 
   memset(buf_clear,0,sizeof(buf_clear)); 
@@ -284,21 +283,12 @@ static void init_xfers(int n, struct spi_ioc_transfer * xfers)
 
 
 
-static int setup_change_mode(struct spi_ioc_transfer * xfer, nuphase_readout_mode_t mode)
-{
-  xfer->tx_buf = SPI_CAST  buf_mode[mode]; 
-  return 0; 
-}
-
-
-
-/* this will use up 3 xfer's, assumed to be zeroed already. DOES NOT SET MODE.  */
+/* this will use up 2 xfer's, assumed to be zeroed already. DOES NOT SET MODE.  */
 static int setup_read_register(struct spi_ioc_transfer * xfers, uint8_t address, uint8_t *result)
 {
 
   xfers[0].tx_buf = SPI_CAST  buf_set_read_reg[address]; 
-  xfers[1].tx_buf = SPI_CAST  buf_read; 
-  xfers[2].rx_buf = SPI_CAST  result; 
+  xfers[1].rx_buf = SPI_CAST  result; 
 
   return 0; 
 }
@@ -363,13 +353,36 @@ static int xfer_buffer_read_register(struct xfer_buffer * b, uint8_t address, ui
 {
   int ret = 0; 
   ret += xfer_buffer_append(b, buf_set_read_reg[address],0);
-  ret += xfer_buffer_append(b, buf_read,0);
   ret += xfer_buffer_append(b,0,result); 
   return ret; 
 }
 
-/* this will use up 13*naddr xfers.  MUST start on chunk 0 */ 
 static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
+{
+
+  int iaddr; 
+  int ichunk; 
+  int ret = 0; 
+
+  for (iaddr = 0; iaddr < naddr; iaddr++) 
+  {
+    ret += xfer_buffer_append(xfers, buf_ram_addr[start_address + iaddr], 0); 
+    if (ret) return ret; 
+
+    for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
+    {
+      ret+= xfer_buffer_append(xfers, buf_chunk[ichunk], 0); 
+      if (ret) return ret; 
+
+      ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
+      if (ret) return ret; 
+    }
+  }
+
+  return 0; 
+}
+
+static int loop_over_chunks_full_duplex(struct xfer_buffer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
 {
 
   int iaddr; 
@@ -383,19 +396,21 @@ static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t nadd
 
     for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
     {
-      ret+= xfer_buffer_append(xfers, buf_chunk[ichunk], 0); 
+      ret+= xfer_buffer_append(xfers, buf_chunk[ichunk], iaddr == 0 && ichunk == 0 ? 0 : result + NP_NUM_CHUNK * NP_SPI_BYTES * iaddr + (ichunk-1) * NP_SPI_BYTES); 
       if (ret) return ret; 
 
-      ret+= xfer_buffer_append(xfers, buf_read, 0); 
-      if (ret) return ret; 
-
-      ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
-      if (ret) return ret; 
+      if (iaddr == naddr-1 && ichunk == NP_NUM_CHUNK - 1)
+      {
+        ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
+        if (ret) return ret; 
+      }
     }
   }
 
   return 0; 
 }
+
+
 
 int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start, uint8_t finish, uint8_t * data) 
 {
@@ -421,16 +436,15 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t 
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 {
 
-  struct spi_ioc_transfer xfer[4]; 
+  struct spi_ioc_transfer xfer[2]; 
   int wrote; 
   if (address > NP_ADDRESS_MAX) return -1; 
-  init_xfers(4,xfer); 
-  setup_change_mode(xfer, MODE_REGISTER); 
-  setup_read_register(xfer+1, address,result); 
+  init_xfers(2,xfer); 
+  setup_read_register(xfer, address,result); 
   USING(d); 
-  wrote= do_xfer(d->spi_fd, 4, xfer); 
+  wrote= do_xfer(d->spi_fd, 2, xfer); 
   DONE(d);
-  return wrote < 4 * NP_SPI_BYTES; 
+  return wrote < 2 * NP_SPI_BYTES; 
 }
 
 
@@ -576,16 +590,15 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   uint8_t dna_mid[NP_SPI_BYTES]; 
   uint8_t dna_hi[NP_SPI_BYTES]; 
 
-  init_xfers(16,xfers); 
-  setup_change_mode(xfers, MODE_REGISTER); 
-  setup_read_register(xfers+1, REG_FIRMWARE_VER, version); 
-  setup_read_register(xfers+4, REG_FIRMWARE_DATE, date); 
-  setup_read_register(xfers+7, REG_CHIPID_LOW, dna_low); 
-  setup_read_register(xfers+10, REG_CHIPID_MID, dna_mid); 
-  setup_read_register(xfers+13, REG_CHIPID_HI, dna_hi); 
+  init_xfers(10,xfers); 
+  setup_read_register(xfers, REG_FIRMWARE_VER, version); 
+  setup_read_register(xfers+2, REG_FIRMWARE_DATE, date); 
+  setup_read_register(xfers+4, REG_CHIPID_LOW, dna_low); 
+  setup_read_register(xfers+6, REG_CHIPID_MID, dna_mid); 
+  setup_read_register(xfers+8, REG_CHIPID_HI, dna_hi); 
 
   USING(d); 
-  wrote = do_xfer(d->spi_fd, 16, xfers); 
+  wrote = do_xfer(d->spi_fd, 10, xfers); 
   DONE(d); 
   info->ver.major = version[3] >>4 ; 
   info->ver.minor = version[3] & 0x0f; 
@@ -599,7 +612,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   uint64_t dna_hi_big =  dna_hi[3] | dna_hi[2] << 8 ;
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
 
-  return wrote < 16 * NP_SPI_BYTES; 
+  return wrote < 10 * NP_SPI_BYTES; 
 }
 
 
@@ -1044,7 +1057,6 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
     /**Grab metadata! */ 
     //switch to register mode  
-    CHK(xfer_buffer_append(&xfers, buf_mode[MODE_REGISTER],0)) 
 
     //we will pretend like we are bigendian so we can just call be64toh on the u64
     CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, &event_counter.u32[0])) 
@@ -1143,6 +1155,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       {
         CHK(xfer_buffer_append(&xfers, buf_channel[ichan],0)) 
         CHK(loop_over_chunks_half_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ichan]))
+//        CHK(loop_over_chunks_full_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ichan]))
       }
       else
       {
