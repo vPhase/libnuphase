@@ -10,10 +10,12 @@
 
 volatile static int stop = 0; 
 
+nuphase_dev_t * dev;
 static void catch_interrupt(int signo)
 {
 
   printf("Caught interrupt...\n"); 
+  nuphase_cancel_wait(dev); 
   stop =1; 
 }
 
@@ -21,7 +23,6 @@ static void catch_interrupt(int signo)
 int main(int nargs, char ** args )
 {
 
-  nuphase_dev_t * dev;
   nuphase_header_t hd[4]; 
   nuphase_event_t ev[4]; 
 
