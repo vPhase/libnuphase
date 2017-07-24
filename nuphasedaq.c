@@ -937,13 +937,13 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
 
     struct spi_ioc_transfer xfer[4]; 
     uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, c->attenuation[2], c->attenuation[1], c->attenuation[0] }; //TODO check order 
-    uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_012, c->attenuation[5], c->attenuation[4], c->attenuation[3] }; //TODO check order 
-    uint8_t attenuation_078[NP_SPI_BYTES] = { REG_ATTEN_012, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
+    uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, c->attenuation[5], c->attenuation[4], c->attenuation[3] }; //TODO check order 
+    uint8_t attenuation_67[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
 
 
     xfer[0].tx_buf = SPI_CAST attenuation_012; 
     xfer[1].tx_buf = SPI_CAST attenuation_345; 
-    xfer[2].tx_buf = SPI_CAST attenuation_078; 
+    xfer[2].tx_buf = SPI_CAST attenuation_67; 
     xfer[3].tx_buf = SPI_CAST buf_apply_attenuator; 
 
     if (do_xfer(d->spi_fd, 4, xfer)  == 4 * NP_SPI_BYTES)
