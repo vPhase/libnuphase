@@ -316,4 +316,13 @@ void nuphase_cancel_wait(nuphase_dev_t *d) ;
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result); 
 
 
+//TODO: 
+/** Set the spi clock rate*/ 
+
+// int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock); 
+// int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs_toggle); 
+// int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned cs_toggle); 
+
+
+
 #endif
