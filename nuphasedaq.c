@@ -125,6 +125,8 @@ struct nuphase_dev
   uint8_t next_read_buffer; //what buffer to read next 
   uint8_t hardware_next; // what buffer the hardware things we should read next 
   int spi_clock; 
+  int cs_change; 
+  int delay_us; 
 
   // store event / header used for calibration here in case we want it later? 
   nuphase_event_t calib_ev; 
@@ -281,7 +283,7 @@ void fillBuffers()
 
 
 
-static void init_xfers(int n, struct spi_ioc_transfer * xfers)
+static void init_xfers(int n, struct spi_ioc_transfer * xfers, const nuphase_dev_t *d)
 {
   int i; 
 
@@ -289,8 +291,8 @@ static void init_xfers(int n, struct spi_ioc_transfer * xfers)
   for (i = 0; i < n; i++)
   {
     xfers[i].len = NP_SPI_BYTES; 
-    xfers[i].cs_change =NP_CS_CHANGE; //deactivate cs between transfers
-    xfers[i].delay_usecs = NP_DELAY_USECS; //? 
+    xfers[i].cs_change =d->cs_change; //deactivate cs between transfers
+    xfers[i].delay_usecs = d->delay_us;//? 
   }
 }
 
@@ -318,11 +320,11 @@ struct xfer_buffer
   int fd; 
 };
 
-static void xfer_buffer_init(struct xfer_buffer * b, int fd) 
+static void xfer_buffer_init(struct xfer_buffer * b,  const nuphase_dev_t * dev) 
 {
-  init_xfers(511,b->spi); 
+  init_xfers(511,b->spi, dev); 
   b->nused = 0; 
-  b->fd = fd; 
+  b->fd = dev->spi_fd; 
 }
 
 
@@ -430,7 +432,7 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t 
 {
 
   struct xfer_buffer xfers; 
-  xfer_buffer_init(&xfers, d->spi_fd); 
+  xfer_buffer_init(&xfers,d); 
   uint8_t naddress = finish - start + 1; 
   int ret = 0; 
   ret += xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
@@ -453,7 +455,7 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
   struct spi_ioc_transfer xfer[2]; 
   int wrote; 
   if (address > NP_ADDRESS_MAX) return -1; 
-  init_xfers(2,xfer); 
+  init_xfers(2,xfer,d); 
   setup_read_register(xfer, address,result); 
   USING(d); 
   wrote= do_xfer(d->spi_fd, 2, xfer); 
@@ -513,6 +515,8 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   dev->cancel_wait = 0; 
   dev->event_counter = 0; 
   dev->next_read_buffer = 0; 
+  dev->cs_change =NP_CS_CHANGE; 
+  dev->delay_us =NP_DELAY_USECS; 
 
   if (gpio) 
   {
@@ -531,11 +535,9 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
 
 
   //Configure the SPI protocol 
-  //TODO: need some checks here. 
-  uint32_t speed = SPI_CLOCK; 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
-  ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
+  ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &dev->spi_clock); 
 
 
   //configuration 
@@ -606,7 +608,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   uint8_t dna_mid[NP_SPI_BYTES]; 
   uint8_t dna_hi[NP_SPI_BYTES]; 
 
-  init_xfers(10,xfers); 
+  init_xfers(10,xfers,d); 
   setup_read_register(xfers, REG_FIRMWARE_VER, version); 
   setup_read_register(xfers+2, REG_FIRMWARE_DATE, date); 
   setup_read_register(xfers+4, REG_CHIPID_LOW, dna_low); 
@@ -846,7 +848,7 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next)
   uint8_t result[NP_SPI_BYTES]; 
   uint8_t result2[NP_SPI_BYTES]; 
   struct spi_ioc_transfer xfer[4]; 
-  init_xfers(4,xfer); 
+  init_xfers(4,xfer,d); 
   nuphase_buffer_mask_t mask; 
   setup_read_register(xfer, REG_STATUS, result); 
   setup_read_register(xfer+2, REG_STATUS, result2); 
@@ -937,7 +939,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   {
     uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
     struct spi_ioc_transfer xfer[NP_NUM_BEAMS]; 
-    init_xfers(NP_NUM_BEAMS, xfer); 
+    init_xfers(NP_NUM_BEAMS, xfer,d); 
     int i; 
     for (i = 0; i < NP_NUM_BEAMS; i++)
     {
@@ -1051,7 +1053,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   int ret = 0; 
   struct xfer_buffer xfers; 
   struct timespec now; 
-  xfer_buffer_init(&xfers, d->spi_fd); 
+  xfer_buffer_init(&xfers, d); 
 
   // we need to store some stuff in an intermediate format 
   // prior to putting into the header since the bits don't match 
@@ -1270,7 +1272,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
   _Static_assert (nxfers < 512, "TOO MANY IOC MESSAGES" ); 
 
   struct spi_ioc_transfer xfers[nxfers];
-  init_xfers(nxfers, xfers); 
+  init_xfers(nxfers, xfers,d); 
 
   xfers[ixfer++].tx_buf = SPI_CAST buf_mode[MODE_REGISTER]; 
   xfers[ixfer++].tx_buf = SPI_CAST buf_update_scalers; 
@@ -1569,5 +1571,27 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
 
    //finally we must configure it the way we like it 
    return nuphase_configure(d,c,1); 
+}
+
+int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock) 
+{
+  d->spi_clock = clock*10000; 
+  USING(d); 
+  ioctl(d->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &d->spi_clock); 
+  DONE(d); 
+
+  return 0; //check? 
+}
+
+int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs) 
+{
+  d->cs_change = cs;
+  return 0; 
+}
+
+int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay) 
+{
+  d->delay_us = delay;
+  return 0; 
 }
 

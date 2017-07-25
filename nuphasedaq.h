@@ -317,11 +317,14 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result);
 
 
 //TODO: 
-/** Set the spi clock rate*/ 
+/** Set the spi clock rate in MHz (default 10MHz)*/ 
+int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock); 
 
-// int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock); 
-// int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs_toggle); 
-// int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned cs_toggle); 
+/** toggle chipselect between each transfer (Default yes) */ 
+int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs_toggle); 
+
+/** toggle additional delay between transfers (Default 0) */ 
+int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay_usecs); 
 
 
 
