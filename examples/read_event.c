@@ -49,7 +49,7 @@ int main(int nargs, char ** args )
   printf("Mask after waiting: %x\n", mask); 
 
   clock_gettime(CLOCK_MONOTONIC,&t0); 
-  nuphase_read_single(dev, 0,  &hd, &ev); 
+  nuphase_read_single(dev,__builtin_ctz(mask)  ,  &hd, &ev); 
   clock_gettime(CLOCK_MONOTONIC,&t1); 
 
   printf("Approx time to read out:  %g ms\n", 1000*t1.tv_sec + 1e-6 * t1.tv_nsec - 1000 * t0.tv_sec - 1e-6  * t0.tv_nsec); 
