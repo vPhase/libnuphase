@@ -197,8 +197,10 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
  **/
 int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds); 
 
-/** Checks to see which buffers are ready to be read */ 
-nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d);
+/** Checks to see which buffers are ready to be read
+ * If next_buffer is non-zero, will fill it with what the board things the next buffer to read is. 
+ * */ 
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buffer  );
 
 /** Retrieve the firmware info */
 int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo); 
@@ -312,6 +314,18 @@ void nuphase_cancel_wait(nuphase_dev_t *d) ;
  * 
  **/ 
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result); 
+
+
+//TODO: 
+/** Set the spi clock rate in MHz (default 10MHz)*/ 
+int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock); 
+
+/** toggle chipselect between each transfer (Default yes) */ 
+int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs_toggle); 
+
+/** toggle additional delay between transfers (Default 0) */ 
+int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay_usecs); 
+
 
 
 #endif

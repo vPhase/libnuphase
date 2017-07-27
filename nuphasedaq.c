@@ -24,7 +24,7 @@
 #define NP_NUM_REGISTER 128
 #define BUF_MASK 0xf
 #define MAX_PRETRIGGER 8 
-#define BOARD_CLOCK_HZ 7500000
+#define BOARD_CLOCK_HZ 25000000
 
 #define MIN_GOOD_MAX_V 20 
 #define MAX_MISERY 25 
@@ -32,9 +32,10 @@
 #define SPI_CAST  (uintptr_t) 
 
 #define NP_DELAY_USECS 0
-#define NP_CS_CHANGE 0
+#define NP_CS_CHANGE 1
 
 #define POLL_USLEEP 500
+//#define SPI_CLOCK 1000000
 #define SPI_CLOCK 10000000
 
 //#define DEBUG_PRINTOUTS 1 
@@ -50,6 +51,7 @@ typedef enum
   REG_CHIPID_MID = 0x05,  
   REG_CHIPID_HI = 0x06,  
   REG_STATUS = 0x07, 
+  REG_CLEAR_STATUS = 0x09, 
   REG_EVENT_COUNTER_LOW = 0xa, 
   REG_EVENT_COUNTER_HIGH = 0xb, 
   REG_TRIG_COUNTER_LOW = 0xc, 
@@ -87,6 +89,13 @@ typedef enum
 } nuphase_register_t; 
 
 
+void easy_break_point()
+{
+  //this is here just for an easy break point
+  fprintf(stderr,"OOPS\n"); 
+}
+
+
 //readout modes 
 typedef enum 
 {
@@ -113,10 +122,17 @@ struct nuphase_dev
   volatile int cancel_wait; // needed for signal handlers 
   struct timespec start_time; //the time of the last clock reset
   long waiting_thread;     // needed for signal handlers (if gpio is used) 
+  uint8_t next_read_buffer; //what buffer to read next 
+  uint8_t hardware_next; // what buffer the hardware things we should read next 
+  int spi_clock; 
+  int cs_change; 
+  int delay_us; 
 
   // store event / header used for calibration here in case we want it later? 
   nuphase_event_t calib_ev; 
   nuphase_header_t calib_hd; 
+
+  //TODO: store a send buffer here to simplify some of the code. 
 
 
 }; 
@@ -267,7 +283,7 @@ void fillBuffers()
 
 
 
-static void init_xfers(int n, struct spi_ioc_transfer * xfers)
+static void init_xfers(int n, struct spi_ioc_transfer * xfers, const nuphase_dev_t *d)
 {
   int i; 
 
@@ -275,8 +291,8 @@ static void init_xfers(int n, struct spi_ioc_transfer * xfers)
   for (i = 0; i < n; i++)
   {
     xfers[i].len = NP_SPI_BYTES; 
-    xfers[i].cs_change =NP_CS_CHANGE; //deactivate cs between transfers
-    xfers[i].delay_usecs = NP_DELAY_USECS; //? 
+    xfers[i].cs_change =d->cs_change; //deactivate cs between transfers
+    xfers[i].delay_usecs = d->delay_us;//? 
   }
 }
 
@@ -304,11 +320,11 @@ struct xfer_buffer
   int fd; 
 };
 
-static void xfer_buffer_init(struct xfer_buffer * b, int fd) 
+static void xfer_buffer_init(struct xfer_buffer * b,  const nuphase_dev_t * dev) 
 {
-  init_xfers(511,b->spi); 
+  init_xfers(511,b->spi, dev); 
   b->nused = 0; 
-  b->fd = fd; 
+  b->fd = dev->spi_fd; 
 }
 
 
@@ -416,7 +432,7 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t 
 {
 
   struct xfer_buffer xfers; 
-  xfer_buffer_init(&xfers, d->spi_fd); 
+  xfer_buffer_init(&xfers,d); 
   uint8_t naddress = finish - start + 1; 
   int ret = 0; 
   ret += xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
@@ -439,7 +455,7 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
   struct spi_ioc_transfer xfer[2]; 
   int wrote; 
   if (address > NP_ADDRESS_MAX) return -1; 
-  init_xfers(2,xfer); 
+  init_xfers(2,xfer,d); 
   setup_read_register(xfer, address,result); 
   USING(d); 
   wrote= do_xfer(d->spi_fd, 2, xfer); 
@@ -495,8 +511,12 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   dev = malloc(sizeof(nuphase_dev_t)); 
   dev->device_name = devicename; 
   dev->spi_fd =fd;
+  dev->spi_clock = SPI_CLOCK; 
   dev->cancel_wait = 0; 
   dev->event_counter = 0; 
+  dev->next_read_buffer = 0; 
+  dev->cs_change =NP_CS_CHANGE; 
+  dev->delay_us =NP_DELAY_USECS; 
 
   if (gpio) 
   {
@@ -515,11 +535,9 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
 
 
   //Configure the SPI protocol 
-  //TODO: need some checks here. 
-  uint32_t speed = SPI_CLOCK; 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   ioctl(dev->spi_fd, SPI_IOC_WR_MODE, &mode); 
-  ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed); 
+  ioctl(dev->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &dev->spi_clock); 
 
 
   //configuration 
@@ -590,7 +608,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   uint8_t dna_mid[NP_SPI_BYTES]; 
   uint8_t dna_hi[NP_SPI_BYTES]; 
 
-  init_xfers(10,xfers); 
+  init_xfers(10,xfers,d); 
   setup_read_register(xfers, REG_FIRMWARE_VER, version); 
   setup_read_register(xfers+2, REG_FIRMWARE_DATE, date); 
   setup_read_register(xfers+4, REG_CHIPID_LOW, dna_low); 
@@ -705,7 +723,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
       if (d->cancel_wait) break; 
       usleep(POLL_USLEEP); 
       waited += POLL_USLEEP * 1e-6; //us to s 
-      something = nuphase_check_buffers(d); 
+      something = nuphase_check_buffers(d,&d->hardware_next); 
     }
     int interrupted = d->cancel_wait; //were we interrupted? 
 
@@ -800,7 +818,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
   }
 
  //if we made it this far, this means we unmasked the interrupt, we probably got something, 
- if (ready_buffers) *ready_buffers = nuphase_check_buffers(d); 
+ if (ready_buffers) *ready_buffers = nuphase_check_buffers(d,&d->hardware_next); 
  ret = 0;  //we want to return success
 
  cleanup: 
@@ -824,13 +842,24 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 
 
 
-nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d) 
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next) 
 {
 
   uint8_t result[NP_SPI_BYTES]; 
+  uint8_t result2[NP_SPI_BYTES]; 
+  struct spi_ioc_transfer xfer[4]; 
+  init_xfers(4,xfer,d); 
   nuphase_buffer_mask_t mask; 
-  nuphase_read_register(d, REG_STATUS, result); 
+  setup_read_register(xfer, REG_STATUS, result); 
+  setup_read_register(xfer+2, REG_STATUS, result2); 
+  do_xfer(d->spi_fd, 4, xfer); 
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
+  if (mask != (result2[3] & BUF_MASK))
+  {
+    fprintf(stderr,"Got different answers mask0: %x mask1: %x next0: %d, next1: %d \n", mask, result2[3] & BUF_MASK, (result[2] >> 4) & 0x3,  (result2[2] >> 4) & 0x3); 
+
+  }
+  if (next) *next = (result[2] >> 4) & 0x3; 
   return mask; 
 }
 
@@ -910,7 +939,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   {
     uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
     struct spi_ioc_transfer xfer[NP_NUM_BEAMS]; 
-    init_xfers(NP_NUM_BEAMS, xfer); 
+    init_xfers(NP_NUM_BEAMS, xfer,d); 
     int i; 
     for (i = 0; i < NP_NUM_BEAMS; i++)
     {
@@ -977,6 +1006,7 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
   if (!nuphase_wait(d,&mask,-1) && mask) 
   {
     int ret; 
+//    printf("dev->next_read_buffer: %d, mask after waiting: %x, hw_next: %d\n",d->next_read_buffer, mask, d->hardware_next); 
     ret = nuphase_read_multiple_array(d,mask,&(*headers)[0], &(*events)[0]); 
     if (!ret) return __builtin_popcount(mask); 
     else return -1; 
@@ -1009,13 +1039,6 @@ int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nu
 }
 
 
-/* for endianness */ 
-typedef union bignum 
-{
-      uint64_t u64; 
-      uint8_t u32[2]; 
-} bignum_t; 
-
 
 //lazy error checking macro 
 #define CHK(X) if (X) { ret++; goto the_end; } 
@@ -1030,41 +1053,52 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   int ret = 0; 
   struct xfer_buffer xfers; 
   struct timespec now; 
-  xfer_buffer_init(&xfers, d->spi_fd); 
+  xfer_buffer_init(&xfers, d); 
 
   // we need to store some stuff in an intermediate format 
   // prior to putting into the header since the bits don't match 
-  bignum_t event_counter; 
-  bignum_t trig_counter; 
-  bignum_t trig_time; 
+  uint32_t event_counter[2]; 
+  uint32_t trig_counter[2]; 
+  uint32_t trig_time[2]; 
   uint32_t deadtime; 
   uint32_t tmask; 
   uint32_t tinfo; 
 
+  int iibuf; 
 
-  for (ibuf = 0; ibuf < NP_NUM_BUFFER; ibuf++)
+
+  for (iibuf = 0; iibuf < __builtin_popcount(mask); iibuf++)
   {
+
+    ibuf = d->next_read_buffer; 
     //we are not reading this event right now
     if ( (mask & (1 << ibuf)) == 0)
-      continue; 
+    {
+      fprintf(stderr,"Sync issue? d->next_read_buffer=%d, mask=0x%x, hardware next: %d\n", d->next_read_buffer, mask, d->hardware_next); 
+      easy_break_point(); 
+      d->next_read_buffer =  __builtin_ctz(mask); //pick the lowest buffer to read next 
+      break; 
+    }
 
     clock_gettime(CLOCK_REALTIME, &now); 
 
     //grab the metadata 
     //set the buffer 
     USING(d); 
+    d->event_counter++; 
+    d->next_read_buffer = (d->next_read_buffer + 1) %NP_NUM_BUFFER; 
     CHK(xfer_buffer_append(&xfers, buf_buffer[ibuf],0)) 
 
     /**Grab metadata! */ 
     //switch to register mode  
 
     //we will pretend like we are bigendian so we can just call be64toh on the u64
-    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, &event_counter.u32[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_HIGH, &event_counter.u32[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_LOW, &trig_counter.u32[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_HIGH, &trig_counter.u32[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_LOW, &trig_time.u32[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_HIGH, &trig_time.u32[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, (uint8_t*) &event_counter[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_HIGH, (uint8_t*) &event_counter[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_LOW, (uint8_t*) &trig_counter[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_HIGH,(uint8_t*)  &trig_counter[1])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_LOW,(uint8_t*)  &trig_time[0])) 
+    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_HIGH,(uint8_t*)  &trig_time[1])) 
     CHK(xfer_buffer_read_register(&xfers,REG_DEADTIME, (uint8_t*) &deadtime)) 
     CHK(xfer_buffer_read_register(&xfers,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
     CHK(xfer_buffer_read_register(&xfers,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
@@ -1081,18 +1115,25 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 #ifdef DEBUG_PRINTOUTS
     printf("Raw tinfo: %x\n", tinfo) ;
     printf("Raw tmask: %x\n", tmask) ;
-    printf("Raw event_counter: %llx\n", event_counter.u64) ;
-    printf("Raw trig_counter: %llx\n", trig_counter.u64) ;
-    printf("Raw trig_time: %llx\n", trig_time.u64) ;
+    printf("Raw event_counter: %x %x\n", event_counter[0], event_counter[1]) ;
+    printf("Raw trig_counter: %x %x\n", trig_counter[0], trig_counter[1]) ;
+    printf("Raw trig_time: %x %x \n", trig_time[0], trig_time[1]) ;
 #endif 
     
     // check the event counter
-    event_counter.u64 = be64toh(event_counter.u64); 
+    event_counter[0] = be32toh(event_counter[0]) & 0xffffff; 
+    event_counter[1] = be32toh(event_counter[1]) & 0xffffff; 
+    trig_counter[0] = be32toh(trig_counter[0]) & 0xffffff; 
+    trig_counter[1] = be32toh(trig_counter[1]) & 0xffffff; 
+    trig_time[0] = be32toh(trig_time[0]) & 0xffffff; 
+    trig_time[1] = be32toh(trig_time[1]) & 0xffffff; 
 
+    uint64_t big_event_counter = event_counter[0] + (event_counter[1] << 24); 
 
-    if (d->event_counter != event_counter.u64) 
+    if (d->event_counter !=  big_event_counter)
     {
-      fprintf(stderr,"Event counter mismatch!!! (sw: %"PRIu64", hw: %"PRIu64")\n", d->event_counter, event_counter.u64); 
+      fprintf(stderr,"Event counter mismatch!!! (sw: %"PRIu64", hw: %"PRIu64")\n", d->event_counter, big_event_counter); 
+      easy_break_point(); 
     }
 
     //now fill in header data 
@@ -1103,18 +1144,19 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     if ( hwbuf  != ibuf)
     {
       fprintf(stderr,"Buffer number mismatch!!! (sw: %u, hw: %u)\n", ibuf, hwbuf ); 
+      easy_break_point(); 
     }
     
-    hd[iout]->event_number = d->event_number_offset + event_counter.u64; 
-    hd[iout]->trig_number = be64toh(trig_counter.u64); 
+    hd[iout]->event_number = d->event_number_offset + big_event_counter; 
+    hd[iout]->trig_number = trig_counter[0] + (trig_counter[1] << 24); 
     hd[iout]->buffer_length = d->buffer_length; 
     hd[iout]->pretrigger_samples = d->cfg.pretrigger* 8 * 16; //TODO define these constants somewhere
     hd[iout]->readout_time = now.tv_sec; 
     hd[iout]->readout_time_ns = now.tv_nsec; 
-    hd[iout]->trig_time = be64toh(trig_time.u64); 
+    hd[iout]->trig_time =trig_time[0] + (trig_time[1] << 24); 
 
-    hd[iout]->approx_trigger_time= d->start_time.tv_sec + trig_time.u64 / BOARD_CLOCK_HZ; 
-    hd[iout]->approx_trigger_time_nsecs = d->start_time.tv_nsec + (trig_time.u64 % BOARD_CLOCK_HZ) *(1.e9 / BOARD_CLOCK_HZ); 
+    hd[iout]->approx_trigger_time= d->start_time.tv_sec + hd[iout]->trig_time / BOARD_CLOCK_HZ; 
+    hd[iout]->approx_trigger_time_nsecs = d->start_time.tv_nsec + (hd[iout]->trig_time % BOARD_CLOCK_HZ) *(1.e9 / BOARD_CLOCK_HZ); 
     if (hd[iout]->approx_trigger_time_nsecs > 1e9) 
     {
       hd[iout]->approx_trigger_time++; 
@@ -1125,10 +1167,10 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     hd[iout]->beam_mask = tmask & 0x7fff;  
     for (ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
     {
-      hd[iout]->beam_power[ibeam] = be32toh(hd[iout]->beam_power[ibeam]); 
+      hd[iout]->beam_power[ibeam] = be32toh(hd[iout]->beam_power[ibeam]) & 0xffffff; 
 
     }
-    hd[iout]->deadtime = be32toh(deadtime); 
+    hd[iout]->deadtime = be32toh(deadtime) & 0xffffff; 
     hd[iout]->buffer_number = hwbuf; 
     hd[iout]->channel_mask = (tmask >> 15) & 0xff; 
     hd[iout]->channel_overflow = 0; //TODO not implemented yet 
@@ -1137,7 +1179,6 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
     hd[iout]->calpulser = (tinfo >> 21) & 0x1; 
 
-    d->event_counter++; 
 
 
     //and some event data 
@@ -1163,10 +1204,18 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       }
     }
     CHK(xfer_buffer_append(&xfers, buf_clear[1 << ibuf],0))
+    uint8_t data_status[4]; 
+    CHK(xfer_buffer_read_register(&xfers, REG_CLEAR_STATUS, data_status)) 
     CHK(xfer_buffer_send(&xfers)) //flush so we can clear the buffer immediately 
 
+    if (data_status[3] & (1 << ibuf))
+    {
+      fprintf(stderr,"Did not clear buffer %d ? (or rate too high? buf mask at readout: %x, buf mask after clearing: %x))\n", ibuf, mask, data_status[3] & 0xf) ; 
+      easy_break_point(); 
+    }
+
     iout++; 
-    DONE(d); //give othe rthings a chance to use the lock 
+    DONE(d); //give other things a chance to use the lock 
   }
 
 
@@ -1223,7 +1272,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
   _Static_assert (nxfers < 512, "TOO MANY IOC MESSAGES" ); 
 
   struct spi_ioc_transfer xfers[nxfers];
-  init_xfers(nxfers, xfers); 
+  init_xfers(nxfers, xfers,d); 
 
   xfers[ixfer++].tx_buf = SPI_CAST buf_mode[MODE_REGISTER]; 
   xfers[ixfer++].tx_buf = SPI_CAST buf_update_scalers; 
@@ -1358,6 +1407,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
       return 1; 
   }
 
+  d->next_read_buffer = 0; //reset the next read buffer 
 
   //do the calibration, if necessary 
   
@@ -1492,6 +1542,13 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
     if (!happy) return -1; 
   }
 
+  //sync up the next buffer by sending a software trigger... then clearing it 
+
+  nuphase_check_buffers(d, &d->hardware_next); 
+  d->next_read_buffer = d->hardware_next; 
+//  printf("Starting on buffer: %d\n", d->next_read_buffer); 
+ 
+
 
   //then reset the counters, measuring the time before and after 
    
@@ -1514,5 +1571,27 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
 
    //finally we must configure it the way we like it 
    return nuphase_configure(d,c,1); 
+}
+
+int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock) 
+{
+  d->spi_clock = clock*10000; 
+  USING(d); 
+  ioctl(d->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &d->spi_clock); 
+  DONE(d); 
+
+  return 0; //check? 
+}
+
+int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs) 
+{
+  d->cs_change = cs;
+  return 0; 
+}
+
+int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay) 
+{
+  d->delay_us = delay;
+  return 0; 
 }
 
