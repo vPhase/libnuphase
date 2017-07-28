@@ -17,7 +17,7 @@ int main(int nargs, const char ** args)
 
   //fill a nonsense header 
 
-  hd.event_number = 12345; 
+  hd.readout_number = 12345; 
   hd.trig_number = 23456; 
   hd.buffer_length = 600; 
   hd.pretrigger_samples = 64; 
@@ -49,7 +49,7 @@ int main(int nargs, const char ** args)
 
 
   //fill a nonsene event
-  ev.event_number = hd.event_number; 
+  ev.readout_number = hd.readout_number; 
   ev.buffer_length = hd.buffer_length; 
   ev.board_id = hd.board_id; 
   for (i = 0; i < NP_NUM_CHAN; i++)

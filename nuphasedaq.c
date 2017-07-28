@@ -111,7 +111,7 @@ struct nuphase_dev
   int spi_fd; 
   int gpio_fd; 
   int enable_locking; 
-  uint64_t event_number_offset; 
+  uint64_t readout_number_offset; 
   uint64_t event_counter;  // should match device...we'll keep this to complain if it doesn't
   nuphase_config_t cfg; 
   uint16_t buffer_length; 
@@ -545,7 +545,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   else nuphase_config_init(&dev->cfg); 
 
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
-  dev->event_number_offset = ((uint64_t)time(0)) << 32; 
+  dev->readout_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
   dev->channel_read_mask = 0xff; 
   dev->board_id = board_id_counter++; 
@@ -579,9 +579,9 @@ uint8_t nuphase_get_board_id(const nuphase_dev_t * d)
   return d->board_id; 
 }
 
-void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset) 
+void nuphase_set_readout_number_offset(nuphase_dev_t * d, uint64_t offset) 
 {
-  d->event_number_offset = offset; 
+  d->readout_number_offset = offset; 
 }
 
 
@@ -1147,7 +1147,10 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       easy_break_point(); 
     }
     
-    hd[iout]->event_number = d->event_number_offset + big_event_counter; 
+    hd[iout]->event_number = 0; //will be assigned later
+    ev[iout]->event_number = 0; //will be assigned later
+    hd[iout]->readout_number = d->readout_number_offset + big_event_counter; 
+    ev[iout]->readout_number = hd[iout]->readout_number; 
     hd[iout]->trig_number = trig_counter[0] + (trig_counter[1] << 24); 
     hd[iout]->buffer_length = d->buffer_length; 
     hd[iout]->pretrigger_samples = d->cfg.pretrigger* 8 * 16; //TODO define these constants somewhere

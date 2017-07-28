@@ -75,7 +75,8 @@ typedef enum nuphase_trigger_type
  */
 typedef struct nuphase_header 
 {
-  uint64_t event_number;                         //!< the event number assigned to this event. Will match the event body. 
+  uint64_t event_number;                         //!< A unique identifier for this event. If only one board, will match readout number. Otherwise, might skip if the boards are out of sync. 
+  uint64_t readout_number;                       //!< the number assigned to this event at readout (with an offset). Will match the event body. 
   uint64_t trig_number;                          //!< the sequential (since reset) trigger number assigned to this event. 
   uint16_t buffer_length;                        //!< the buffer length. Stored both here and in the event. 
   uint16_t pretrigger_samples;                   //!< Number of samples that are pretrigger
@@ -105,6 +106,7 @@ typedef struct nuphase_header
 typedef struct nuphase_event
 {
   uint64_t event_number;  //!< The event number. Should match event header.  
+  uint64_t readout_number;  //!< The readout number. Should match event header.  
   uint16_t buffer_length; //!< The buffer length that is actually filled. Also available in event header. 
   uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. 
   uint8_t board_id;     //!< The board number assigned at startup. 

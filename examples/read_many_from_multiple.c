@@ -41,7 +41,7 @@ void * read_device(void * args )
 
 
 
-  nuphase_set_event_number_offset(dev,0); 
+  nuphase_set_readout_number_offset(dev,0); 
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
 

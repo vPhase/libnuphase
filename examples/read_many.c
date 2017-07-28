@@ -46,7 +46,7 @@ int main(int nargs, char ** args )
   signal(SIGINT, catch_interrupt); 
   dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
 
-  nuphase_set_event_number_offset(dev,0); 
+  nuphase_set_readout_number_offset(dev,0); 
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
 

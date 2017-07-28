@@ -33,7 +33,7 @@ int main(int nargs, char ** args )
 
   dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
 
-  nuphase_set_event_number_offset(dev,0); 
+  nuphase_set_readout_number_offset(dev,0); 
 
   if (sw_trigger) 
   {
