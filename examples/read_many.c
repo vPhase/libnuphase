@@ -10,10 +10,12 @@
 
 volatile static int stop = 0; 
 
+nuphase_dev_t * dev;
 static void catch_interrupt(int signo)
 {
 
   printf("Caught interrupt...\n"); 
+  nuphase_cancel_wait(dev); 
   stop =1; 
 }
 
@@ -21,7 +23,6 @@ static void catch_interrupt(int signo)
 int main(int nargs, char ** args )
 {
 
-  nuphase_dev_t * dev;
   nuphase_header_t hd[4]; 
   nuphase_event_t ev[4]; 
 
@@ -45,7 +46,7 @@ int main(int nargs, char ** args )
   signal(SIGINT, catch_interrupt); 
   dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
 
-  nuphase_set_event_number_offset(dev,0); 
+  nuphase_set_readout_number_offset(dev,0); 
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
 
@@ -53,22 +54,29 @@ int main(int nargs, char ** args )
   struct timespec start; 
   struct timespec now; 
 
+  clock_gettime(CLOCK_REALTIME,&now); 
   clock_gettime(CLOCK_REALTIME,&start); 
 
   while (!stop)
   {
+    int nsent = 0; 
     if (sw_trigger) 
     {
+      int itrig = 0;
+      nuphase_sw_trigger(dev); 
+      nsent++; 
+      for (itrig = 0; itrig < (now.tv_nsec / 1000000) % 4 ;itrig++)
+      {
         nuphase_sw_trigger(dev); 
-        nuphase_sw_trigger(dev); 
-        nuphase_sw_trigger(dev); 
-        nuphase_sw_trigger(dev); 
+        nsent++; 
+      }
     }
 
     int nevents = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev); 
     clock_gettime(CLOCK_REALTIME,&now); 
     nev+= nevents; 
     double hz = nev / (now.tv_sec - start.tv_sec + now.tv_nsec *1.e-9 - start.tv_nsec*1.e-9); 
+    printf("Sent %d sw triggers\n", nsent); 
     printf("Just read %d events (total= %d, avg rate = %f Hz)\n",nevents, nev, hz); 
     int i; 
     for (i = 0; i < nevents; i++)

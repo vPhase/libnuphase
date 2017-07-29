@@ -12,8 +12,6 @@
  * This header defines structures, constants, and functions
  * for working with the phased array hardware. 
  *
- * There are 
- * 
  *
  */
 
@@ -73,7 +71,7 @@ typedef struct nuphase_fwinfo
 
 typedef enum nuphase_reset_type 
 {
-  NP_RESET_COUNTERS, //!< resets event number / trig number / trig time only 
+  NP_RESET_COUNTERS, //!< resets event counter / trig number / trig time only 
   NP_RESET_ADC,      //!< resets and recalibrates ADC 
   NP_RESET_ALMOST_GLOBAL, //!< everything but register settings 
   NP_RESET_GLOBAL    //! everything 
@@ -96,10 +94,10 @@ typedef enum nuphase_reset_type
  * from multiple threads. 
  *
  * For now, the device handle also keeps track of the board id, buffer length
- * and the event number offset. On initialization, the board id is set to the next
+ * and the readout number offset. On initialization, the board id is set to the next
  * available id, buffer length is set to the default amount (624 samples) and
- * the event number is set to unixtime << 32. They can be set to something
- * better using nuphase_set_board_id, nuphase_set_buffer_length and nuphase_set_event_number_offset.
+ * the readout number is set to unixtime << 32. They can be set to something
+ * better using nuphase_set_board_id, nuphase_set_buffer_length and nuphase_set_readout_number_offset.
  *
  * The default nuphase_config_t is also sent on startup. Changes can be made
  * using nuphase_configure. 
@@ -132,7 +130,7 @@ int nuphase_close(nuphase_dev_t * d);
 void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
 
 
-/** Set the event number offset. Currently DOES NOT reset the counter
+/** Set the readout number offset. Currently DOES NOT reset the counter
  * on the board (only done on nuphase_open / nuphase_reset). 
  *
  * This means you must run this either right after open or reset and before reading any buffers
@@ -141,7 +139,7 @@ void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
  * @param offset the offset to set
  *
  **/ 
-void nuphase_set_event_number_offset(nuphase_dev_t * d, uint64_t offset); 
+void nuphase_set_readout_number_offset(nuphase_dev_t * d, uint64_t offset); 
 
 
 /** Sends a board reset. The reset type is specified by type. 
@@ -197,8 +195,10 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
  **/
 int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds); 
 
-/** Checks to see which buffers are ready to be read */ 
-nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d);
+/** Checks to see which buffers are ready to be read
+ * If next_buffer is non-zero, will fill it with what the board things the next buffer to read is. 
+ * */ 
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buffer  );
 
 /** Retrieve the firmware info */
 int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo); 
@@ -312,6 +312,18 @@ void nuphase_cancel_wait(nuphase_dev_t *d) ;
  * 
  **/ 
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result); 
+
+
+//TODO: 
+/** Set the spi clock rate in MHz (default 10MHz)*/ 
+int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock); 
+
+/** toggle chipselect between each transfer (Default yes) */ 
+int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs_toggle); 
+
+/** toggle additional delay between transfers (Default 0) */ 
+int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay_usecs); 
+
 
 
 #endif
