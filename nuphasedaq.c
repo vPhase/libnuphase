@@ -35,8 +35,8 @@
 #define NP_CS_CHANGE 1
 
 #define POLL_USLEEP 500
-//#define SPI_CLOCK 1000000
 #define SPI_CLOCK 10000000
+//#define SPI_CLOCK 1000000
 
 //#define DEBUG_PRINTOUTS 1 
 
@@ -242,7 +242,7 @@ void fillBuffers()
   for (i = 0; i < NP_NUM_CHAN; i++) 
   {
     buf_channel[i][0] = REG_CHANNEL; 
-    buf_channel[i][3] = 1+i; 
+    buf_channel[i][3] = 1<<i; 
   }
 
   memset(buf_buffer,0,sizeof(buf_buffer)); 
@@ -848,11 +848,13 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next)
   uint8_t result[NP_SPI_BYTES]; 
   uint8_t result2[NP_SPI_BYTES]; 
   struct spi_ioc_transfer xfer[4]; 
+  int ret = 0;
   init_xfers(4,xfer,d); 
   nuphase_buffer_mask_t mask; 
   setup_read_register(xfer, REG_STATUS, result); 
   setup_read_register(xfer+2, REG_STATUS, result2); 
-  do_xfer(d->spi_fd, 4, xfer); 
+  ret = do_xfer(d->spi_fd, 4, xfer); 
+  if (ret == 0) return -1; 
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (mask != (result2[3] & BUF_MASK))
   {
