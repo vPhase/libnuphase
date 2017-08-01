@@ -1,14 +1,20 @@
-#include "nuphasedaq.h" 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <linux/spi/spidev.h>
 #include <stdio.h> 
+#include <stdint.h>
 #include <stdlib.h> 
+#include <sys/file.h>
+#include <sys/ioctl.h>
 
 
 // write_word spidev byte0 byte1 byte2 byte3 
 int main(int nargs, char ** args) 
 {
   uint8_t bytes[4]; 
-  int i,status;
-  nuphase_dev_t * dev;
+  int i;
 
 
   if (nargs < 6) 
@@ -18,21 +24,20 @@ int main(int nargs, char ** args)
   }
 
   //no interrupt, no locking, default config, 
-  dev = nuphase_open(args[1],0,0,0); 
+  int dev = open(args[1],O_RDWR); 
+
+  ioctl(dev, SPI_IOC_WR_MODE,0); 
+  ioctl(dev, SPI_IOC_WR_MAX_SPEED_HZ, 10000000); 
 
   for (i = 0; i < 4; i++)
   {
     bytes[i] = strtol(args[i+2], 0, 16); 
   }
 
-  for (i = 0; i < 4; i++) 
-  {
-    printf("Sending:(%x,%x,%x,%x)\n", bytes[0], bytes[1], bytes[2], bytes[3]); 
-  }
+  printf("Sending:(%x,%x,%x,%x)\n", bytes[0], bytes[1], bytes[2], bytes[3]); 
+  write(dev, bytes, 4); 
 
-  status = nuphase_write(dev, bytes); 
-  printf(status ? "Success!\n" : "Something went wrong\n"); 
-  nuphase_close(dev); 
+  close(dev); 
 
   return 0; 
 }
