@@ -28,6 +28,7 @@ int main(int nargs, char ** args )
 
 
   int sw_trigger = 1; 
+  int calpulse = 0;
   if (nargs < 2) 
   {
     printf("Usage: read_event spidev [software trigger = 1] [hdfile=headers.dat]  evfile = [events.dat]\n"); 
@@ -36,7 +37,8 @@ int main(int nargs, char ** args )
 
   if (nargs > 2) 
   {
-    sw_trigger = atoi(args[2]); 
+    sw_trigger = atoi(args[2]) & 1 ; 
+    calpulse = atoi(args[2]) & 2 ; 
   }
 
   FILE * fhd = fopen(nargs > 3 ? args[3]: "headers.dat" ,"w"); 
@@ -47,6 +49,8 @@ int main(int nargs, char ** args )
   dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
 
   nuphase_set_readout_number_offset(dev,0); 
+  nuphase_set_buffer_length(dev,127*16); 
+  nuphase_calpulse(dev,calpulse); 
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
 
@@ -87,6 +91,7 @@ int main(int nargs, char ** args )
     }
 
   }
+  nuphase_calpulse(dev,0); 
   nuphase_close(dev); 
 
   fclose(fhd); 
