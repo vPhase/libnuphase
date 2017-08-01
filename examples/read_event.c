@@ -34,7 +34,9 @@ int main(int nargs, char ** args )
   dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
 
   nuphase_set_readout_number_offset(dev,0); 
+  nuphase_set_buffer_length(dev,127*16); 
 
+  nuphase_calpulse(dev,1); 
   if (sw_trigger) 
   {
       nuphase_sw_trigger(dev); 
@@ -45,9 +47,14 @@ int main(int nargs, char ** args )
 
   nuphase_buffer_mask_t mask; 
   nuphase_wait(dev,&mask,1); 
+  if (!mask)
+  {
+    fprintf(stderr,"timed out.. . :(\n"); 
+    return 1; 
+  }
+
 
   printf("Mask after waiting: %x\n", mask); 
-
   clock_gettime(CLOCK_MONOTONIC,&t0); 
   nuphase_read_single(dev,__builtin_ctz(mask)  ,  &hd, &ev); 
   clock_gettime(CLOCK_MONOTONIC,&t1); 
@@ -60,6 +67,7 @@ int main(int nargs, char ** args )
   nuphase_header_print(stdout, &hd); 
 //  nuphase_event_print(stdout, &ev, ','); 
 
+  nuphase_calpulse(dev,0); 
   nuphase_close(dev); 
   fclose(fhd); 
   fclose(fev); 
