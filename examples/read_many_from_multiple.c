@@ -11,12 +11,22 @@
 
 volatile static int stop = 0; 
 
-nuphase_dev_t * dev;
+static int ndevices = 0; 
+static nuphase_dev_t* devices[128] = {0}; 
+
+
 static void catch_interrupt(int signo)
 {
 
   printf("Caught interrupt...\n"); 
-  nuphase_cancel_wait(dev); 
+
+
+  int i; 
+  for (i = 0; i < ndevices; i++)
+  {
+    nuphase_cancel_wait(devices[i]); 
+  }
+
   stop =1; 
 }
 
@@ -30,7 +40,7 @@ void * read_device(void * args )
   nuphase_header_t hd[4]; 
   nuphase_event_t ev[4]; 
 
-  dev =  nuphase_open((const char*)args,0,0,0); //no interrupt for now and no threadlocking
+  nuphase_dev_t *dev =  (nuphase_dev_t*) args; 
   int bid = nuphase_get_board_id(dev); 
 
   char buf[128]; 
@@ -43,7 +53,7 @@ void * read_device(void * args )
 
   nuphase_set_readout_number_offset(dev,0); 
 
-  printf("Starting event loop... ctrl-c to cancel!\n"); 
+  printf("Starting event loop on board %d... ctrl-c to cancel!\n",bid); 
 
   int nev = 0; 
   struct timespec start; 
@@ -66,7 +76,7 @@ void * read_device(void * args )
     clock_gettime(CLOCK_REALTIME,&now); 
     nev+= nevents; 
     double hz = nev / (now.tv_sec - start.tv_sec + now.tv_nsec *1.e-9 - start.tv_nsec*1.e-9); 
-    printf("BD%d: Just read %d events (sent %d, total= %d, avg rate = %f Hz)\n",bid, ntrigs, nevents, nev, hz); 
+    printf("BD%d: Just read %d events (sent %d, total= %d, avg rate = %f Hz)\n",bid, nevents, ntrigs, nev, hz); 
 
     for (i = 0; i < nevents; i++)
     {
@@ -105,14 +115,15 @@ int main(int nargs, char ** args)
   int i; 
   for (i = 1; i < nargs; i++)
   {
-     pthread_create(&threads[i-1],0,read_device,args[i]); 
+     devices[ndevices] = nuphase_open(args[i], 0,0,1); 
+     pthread_create(&threads[i-1],0,read_device,devices[ndevices]); 
+     ndevices++; 
   }
 
   for (i = 0; i < nargs-1; i++)
   {
-    int * thread_ret; 
-    pthread_join(threads[i],(void**) &thread_ret);
-    printf("Done with thread %d, returned %d\n",i, *thread_ret); 
+    pthread_join(threads[i],0);
+    printf("Done with thread %d\n",i); 
   }
 
   return 0; 
