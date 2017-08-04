@@ -268,7 +268,8 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
   start.magic = NUPHASE_EVENT_MAGIC; 
   start.ver = NUPHASE_EVENT_VERSION; 
 
-  start.cksum = stupid_fletcher16(sizeof(ev->readout_number), &ev->readout_number); 
+  start.cksum = stupid_fletcher16(sizeof(ev->event_number), &ev->event_number); 
+  start.cksum = stupid_fletcher16_append(sizeof(ev->readout_number), &ev->readout_number, start.cksum); 
   start.cksum = stupid_fletcher16_append(sizeof(ev->buffer_length), &ev->buffer_length,start.cksum); 
 
   for (i = 0; i < NP_NUM_CHAN; i++) 
@@ -283,6 +284,14 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
   {
     return NP_ERR_NOT_ENOUGH_BYTES; 
   }
+
+  written = generic_write(gf, sizeof(ev->event_number), &ev->event_number); 
+
+  if (written != sizeof(ev->event_number))
+  {
+    return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
+
 
   written = generic_write(gf, sizeof(ev->readout_number), &ev->readout_number); 
   

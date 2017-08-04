@@ -35,6 +35,7 @@ int main(int nargs, char ** args )
         nuphase_read_register(dev,j,result); 
         printf("READ REGISTER %d, GOT: 0x%x 0x%x 0x%x 0x%x\n",j, result[0], result[1], result[2], result[3]); 
     }
+    nuphase_clear_buffer(dev,0xf); 
     sleep(1); 
   }
 

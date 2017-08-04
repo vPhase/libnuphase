@@ -35,8 +35,10 @@
 #define NP_CS_CHANGE 1
 
 #define POLL_USLEEP 500
-//#define SPI_CLOCK 1000000
 #define SPI_CLOCK 10000000
+//#define SPI_CLOCK 1000000
+
+#define MAX_XFERS 511
 
 //#define DEBUG_PRINTOUTS 1 
 
@@ -131,10 +133,8 @@ struct nuphase_dev
   // store event / header used for calibration here in case we want it later? 
   nuphase_event_t calib_ev; 
   nuphase_header_t calib_hd; 
-
-  //TODO: store a send buffer here to simplify some of the code. 
-
-
+  struct spi_ioc_transfer buf[MAX_XFERS]; 
+  int nused; 
 }; 
 
 //Wrappers for io functions to add printouts 
@@ -242,7 +242,7 @@ void fillBuffers()
   for (i = 0; i < NP_NUM_CHAN; i++) 
   {
     buf_channel[i][0] = REG_CHANNEL; 
-    buf_channel[i][3] = 1+i; 
+    buf_channel[i][3] = 1<<i; 
   }
 
   memset(buf_buffer,0,sizeof(buf_buffer)); 
@@ -283,64 +283,29 @@ void fillBuffers()
 
 
 
-static void init_xfers(int n, struct spi_ioc_transfer * xfers, const nuphase_dev_t *d)
+static void setup_xfers( nuphase_dev_t *d)
 {
   int i; 
-
-  memset(xfers,0,n *sizeof(struct spi_ioc_transfer)); 
-  for (i = 0; i < n; i++)
+  for (i = 0; i < MAX_XFERS; i++)
   {
-    xfers[i].len = NP_SPI_BYTES; 
-    xfers[i].cs_change =d->cs_change; //deactivate cs between transfers
-    xfers[i].delay_usecs = d->delay_us;//? 
+    d->buf[i].len = NP_SPI_BYTES; 
+    d->buf[i].cs_change =d->cs_change; //deactivate cs between transfers
+    d->buf[i].delay_usecs = d->delay_us;//? 
   }
 }
 
 
-
-
-/* this will use up 2 xfer's, assumed to be zeroed already. DOES NOT SET MODE.  */
-static int setup_read_register(struct spi_ioc_transfer * xfers, uint8_t address, uint8_t *result)
-{
-
-  xfers[0].tx_buf = SPI_CAST  buf_set_read_reg[address]; 
-  xfers[1].rx_buf = SPI_CAST  result; 
-
-  return 0; 
-}
-
-/* to simplify batching complicated transfers,
- * we use this simple data structure. 
- *
- */ 
-struct xfer_buffer 
-{
-  struct spi_ioc_transfer spi[511]; 
-  int nused; 
-  int fd; 
-};
-
-static void xfer_buffer_init(struct xfer_buffer * b,  const nuphase_dev_t * dev) 
-{
-  init_xfers(511,b->spi, dev); 
-  b->nused = 0; 
-  b->fd = dev->spi_fd; 
-}
-
-
-
-
-static int xfer_buffer_send(struct xfer_buffer *b)
+static int buffer_send(nuphase_dev_t * d)
 {
   int wrote; 
-  if (!b->nused) return 0; 
-  wrote = do_xfer(b->fd, b->nused, b->spi); 
-  if (wrote < b->nused * NP_SPI_BYTES) 
+  if (!d->nused) return 0; 
+  wrote = do_xfer(d->spi_fd, d->nused, d->buf); 
+  if (wrote < d->nused * NP_SPI_BYTES) 
   {
     fprintf(stderr,"IOCTL failed! returned: %d\n",wrote); 
     return -1; 
   }
-  b->nused = 0; 
+  d->nused = 0; 
 
   return 0; 
 }
@@ -348,32 +313,32 @@ static int xfer_buffer_send(struct xfer_buffer *b)
 
 
 // this will send if full!  
-static int xfer_buffer_append(struct xfer_buffer * b, const uint8_t * txbuf, const uint8_t * rxbuf) 
+static int buffer_append(nuphase_dev_t * d, const uint8_t * txbuf, const uint8_t * rxbuf) 
 {
   //check if full 
-  if (b->nused >= 511) //greater than just in case, but it already means something went horribly wrong 
+  if (d->nused >= MAX_XFERS) //greater than just in case, but it already means something went horribly wrong 
   {
-    if (xfer_buffer_send(b))
+    if (buffer_send(d))
     {
       return -1; 
     }
   }
 
-  b->spi[b->nused].tx_buf = SPI_CAST txbuf; 
-  b->spi[b->nused].rx_buf = SPI_CAST rxbuf; 
-  b->nused++; 
+  d->buf[d->nused].tx_buf = SPI_CAST txbuf; 
+  d->buf[d->nused].rx_buf = SPI_CAST rxbuf; 
+  d->nused++; 
   return 0; 
 }
 
-static int xfer_buffer_read_register(struct xfer_buffer * b, uint8_t address, uint8_t * result)
+static int append_read_register(nuphase_dev_t *d, uint8_t address, uint8_t * result)
 {
   int ret = 0; 
-  ret += xfer_buffer_append(b, buf_set_read_reg[address],0);
-  ret += xfer_buffer_append(b,0,result); 
+  ret += buffer_append(d, buf_set_read_reg[address],0);
+  ret += buffer_append(d,0,result); 
   return ret; 
 }
 
-static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
+static int loop_over_chunks_half_duplex(nuphase_dev_t * d, uint8_t naddr, uint8_t start_address, uint8_t * result) 
 {
 
   int iaddr; 
@@ -382,15 +347,15 @@ static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t nadd
 
   for (iaddr = 0; iaddr < naddr; iaddr++) 
   {
-    ret += xfer_buffer_append(xfers, buf_ram_addr[start_address + iaddr], 0); 
+    ret += buffer_append(d, buf_ram_addr[start_address + iaddr], 0); 
     if (ret) return ret; 
 
     for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
     {
-      ret+= xfer_buffer_append(xfers, buf_chunk[ichunk], 0); 
+      ret+= buffer_append(d, buf_chunk[ichunk], 0); 
       if (ret) return ret; 
 
-      ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
+      ret+= buffer_append(d, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
       if (ret) return ret; 
     }
   }
@@ -398,7 +363,8 @@ static int loop_over_chunks_half_duplex(struct xfer_buffer * xfers, uint8_t nadd
   return 0; 
 }
 
-static int loop_over_chunks_full_duplex(struct xfer_buffer * xfers, uint8_t naddr, uint8_t start_address, uint8_t * result) 
+static int __attribute__((unused)) 
+loop_over_chunks_full_duplex(nuphase_dev_t * d, uint8_t naddr, uint8_t start_address, uint8_t * result)  
 {
 
   int iaddr; 
@@ -407,17 +373,17 @@ static int loop_over_chunks_full_duplex(struct xfer_buffer * xfers, uint8_t nadd
 
   for (iaddr  =0; iaddr < naddr; iaddr++) 
   {
-    ret += xfer_buffer_append(xfers, buf_ram_addr[start_address + iaddr], 0); 
+    ret += buffer_append(d, buf_ram_addr[start_address + iaddr], 0); 
     if (ret) return ret; 
 
     for (ichunk = 0; ichunk < NP_NUM_CHUNK; ichunk++)
     {
-      ret+= xfer_buffer_append(xfers, buf_chunk[ichunk], iaddr == 0 && ichunk == 0 ? 0 : result + NP_NUM_CHUNK * NP_SPI_BYTES * iaddr + (ichunk-1) * NP_SPI_BYTES); 
+      ret+= buffer_append(d, buf_chunk[ichunk], iaddr == 0 && ichunk == 0 ? 0 : result + NP_NUM_CHUNK * NP_SPI_BYTES * iaddr + (ichunk-1) * NP_SPI_BYTES); 
       if (ret) return ret; 
 
       if (iaddr == naddr-1 && ichunk == NP_NUM_CHUNK - 1)
       {
-        ret+= xfer_buffer_append(xfers, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
+        ret+= buffer_append(d, 0, result + NP_NUM_CHUNK *NP_SPI_BYTES* iaddr + ichunk * NP_SPI_BYTES); 
         if (ret) return ret; 
       }
     }
@@ -431,20 +397,20 @@ static int loop_over_chunks_full_duplex(struct xfer_buffer * xfers, uint8_t nadd
 int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start, uint8_t finish, uint8_t * data) 
 {
 
-  struct xfer_buffer xfers; 
-  xfer_buffer_init(&xfers,d); 
   uint8_t naddress = finish - start + 1; 
   int ret = 0; 
-  ret += xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
-  ret += xfer_buffer_append(&xfers, buf_buffer[buffer], 0);  if (ret) return 0; 
-  ret += xfer_buffer_append(&xfers, buf_channel[channel], 0);  if (ret) return 0; 
+
   USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us.  
             // we don't lock before these because there is no way we sent enough transfers to trigger a read 
-  ret += loop_over_chunks_half_duplex(&xfers, naddress, start, data);
-  if(!ret) xfer_buffer_send(&xfers); //pick up the stragglers. 
+            //
+  ret += buffer_append(d, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
+  ret += buffer_append(d, buf_buffer[buffer], 0);  if (ret) return 0; 
+  ret += buffer_append(d, buf_channel[channel], 0);  if (ret) return 0; 
+  ret += loop_over_chunks_half_duplex(d, naddress, start, data);
+  if(!ret) ret = buffer_send(d); //pick up the stragglers. 
   DONE(d);  
 
-  return 0; 
+  return ret; 
 }
 
 
@@ -452,15 +418,13 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t 
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 {
 
-  struct spi_ioc_transfer xfer[2]; 
-  int wrote; 
+  int ret; 
   if (address > NP_ADDRESS_MAX) return -1; 
-  init_xfers(2,xfer,d); 
-  setup_read_register(xfer, address,result); 
   USING(d); 
-  wrote= do_xfer(d->spi_fd, 2, xfer); 
+  ret =  append_read_register(d, address,result); 
+  ret += buffer_send(d); 
   DONE(d);
-  return wrote < 2 * NP_SPI_BYTES; 
+  return ret; 
 }
 
 
@@ -551,6 +515,8 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   dev->board_id = board_id_counter++; 
 
   dev->enable_locking = locking; 
+  dev->nused = 0; 
+  setup_xfers(dev); 
 
   if (locking) 
   {
@@ -600,23 +566,21 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
 {
 
   //we need to read 5 registers, so 15 xfers 
-  struct spi_ioc_transfer xfers[16]; 
-  int wrote; 
+  int ret = 0; 
   uint8_t version[NP_SPI_BYTES];
   uint8_t date[NP_SPI_BYTES];
   uint8_t dna_low[NP_SPI_BYTES]; 
   uint8_t dna_mid[NP_SPI_BYTES]; 
   uint8_t dna_hi[NP_SPI_BYTES]; 
 
-  init_xfers(10,xfers,d); 
-  setup_read_register(xfers, REG_FIRMWARE_VER, version); 
-  setup_read_register(xfers+2, REG_FIRMWARE_DATE, date); 
-  setup_read_register(xfers+4, REG_CHIPID_LOW, dna_low); 
-  setup_read_register(xfers+6, REG_CHIPID_MID, dna_mid); 
-  setup_read_register(xfers+8, REG_CHIPID_HI, dna_hi); 
-
   USING(d); 
-  wrote = do_xfer(d->spi_fd, 10, xfers); 
+  ret+=append_read_register(d, REG_FIRMWARE_VER, version); 
+  ret+=append_read_register(d, REG_FIRMWARE_DATE, date); 
+  ret+=append_read_register(d, REG_CHIPID_LOW, dna_low); 
+  ret+=append_read_register(d, REG_CHIPID_MID, dna_mid); 
+  ret+=append_read_register(d, REG_CHIPID_HI, dna_hi); 
+
+  ret+=buffer_send(d); 
   DONE(d); 
   info->ver.major = version[3] >>4 ; 
   info->ver.minor = version[3] & 0x0f; 
@@ -630,7 +594,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   uint64_t dna_hi_big =  dna_hi[3] | dna_hi[2] << 8 ;
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
 
-  return wrote < 10 * NP_SPI_BYTES; 
+  return ret; 
 }
 
 
@@ -639,6 +603,13 @@ int nuphase_close(nuphase_dev_t * d)
   int ret = 0; 
   nuphase_cancel_wait(d); 
   USING(d); 
+
+  //clear the buffer! 
+  if (d->nused) 
+  {
+    ret+= buffer_send(d); 
+  }
+
   if (d->enable_locking)
   {
     //this should be allowed? 
@@ -847,12 +818,15 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next)
 
   uint8_t result[NP_SPI_BYTES]; 
   uint8_t result2[NP_SPI_BYTES]; 
-  struct spi_ioc_transfer xfer[4]; 
-  init_xfers(4,xfer,d); 
   nuphase_buffer_mask_t mask; 
-  setup_read_register(xfer, REG_STATUS, result); 
-  setup_read_register(xfer+2, REG_STATUS, result2); 
-  do_xfer(d->spi_fd, 4, xfer); 
+  int ret = 0; 
+
+  USING(d); 
+  //check twice ... 
+  ret+=append_read_register(d, REG_STATUS, result); 
+  ret+=append_read_register(d, REG_STATUS, result2); 
+  ret+= buffer_send(d); 
+  DONE(d); 
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (mask != (result2[3] & BUF_MASK))
   {
@@ -938,8 +912,6 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   if (force || memcmp(c->trigger_thresholds, d->cfg.trigger_thresholds, sizeof(c->trigger_thresholds)))
   {
     uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
-    struct spi_ioc_transfer xfer[NP_NUM_BEAMS]; 
-    init_xfers(NP_NUM_BEAMS, xfer,d); 
     int i; 
     for (i = 0; i < NP_NUM_BEAMS; i++)
     {
@@ -947,9 +919,12 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
       thresholds_buf[i][1]= (c->trigger_thresholds[i] >> 16 ) & 0xf;
       thresholds_buf[i][2]= ( c->trigger_thresholds[i] >> 8) & 0xff; 
       thresholds_buf[i][3]= c->trigger_thresholds[i] & 0xff;
-      xfer[i].tx_buf =  SPI_CAST &thresholds_buf[i][0]; 
+      ret += buffer_append (d,thresholds_buf[i],0); 
     }
-    if(do_xfer(d->spi_fd, NP_NUM_BEAMS, xfer) == NP_NUM_BEAMS * NP_SPI_BYTES)
+    
+    ret += buffer_send(d); 
+
+    if(!ret)
     {
       //success! 
       memcpy(d->cfg.trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
@@ -964,18 +939,19 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
   if (force || memcmp(c->attenuation, d->cfg.attenuation, sizeof(c->attenuation)))
   {
 
-    struct spi_ioc_transfer xfer[4]; 
     uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, c->attenuation[2], c->attenuation[1], c->attenuation[0] }; //TODO check order 
     uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, c->attenuation[5], c->attenuation[4], c->attenuation[3] }; //TODO check order 
-    uint8_t attenuation_67[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
+    uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
 
 
-    xfer[0].tx_buf = SPI_CAST attenuation_012; 
-    xfer[1].tx_buf = SPI_CAST attenuation_345; 
-    xfer[2].tx_buf = SPI_CAST attenuation_67; 
-    xfer[3].tx_buf = SPI_CAST buf_apply_attenuator; 
 
-    if (do_xfer(d->spi_fd, 4, xfer)  == 4 * NP_SPI_BYTES)
+    ret += buffer_append(d,attenuation_012,0); 
+    ret += buffer_append(d, attenuation_345,0); 
+    ret += buffer_append(d, attenuation_067,0); 
+    ret += buffer_append(d, buf_apply_attenuator,0); 
+
+    ret += buffer_send(d); 
+    if (!ret)
     {
       //success! 
       memcpy(d->cfg.attenuation, c->attenuation, sizeof(c->attenuation)); 
@@ -1051,9 +1027,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   int ibuf,ichan,ibeam;
   int iout = 0; 
   int ret = 0; 
-  struct xfer_buffer xfers; 
   struct timespec now; 
-  xfer_buffer_init(&xfers, d); 
 
   // we need to store some stuff in an intermediate format 
   // prior to putting into the header since the bits don't match 
@@ -1087,30 +1061,30 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     USING(d); 
     d->event_counter++; 
     d->next_read_buffer = (d->next_read_buffer + 1) %NP_NUM_BUFFER; 
-    CHK(xfer_buffer_append(&xfers, buf_buffer[ibuf],0)) 
+    CHK(buffer_append(d, buf_buffer[ibuf],0)) 
 
     /**Grab metadata! */ 
     //switch to register mode  
 
     //we will pretend like we are bigendian so we can just call be64toh on the u64
-    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_LOW, (uint8_t*) &event_counter[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_EVENT_COUNTER_HIGH, (uint8_t*) &event_counter[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_LOW, (uint8_t*) &trig_counter[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_COUNTER_HIGH,(uint8_t*)  &trig_counter[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_LOW,(uint8_t*)  &trig_time[0])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_TIME_HIGH,(uint8_t*)  &trig_time[1])) 
-    CHK(xfer_buffer_read_register(&xfers,REG_DEADTIME, (uint8_t*) &deadtime)) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
-    CHK(xfer_buffer_read_register(&xfers,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
+    CHK(append_read_register(d,REG_EVENT_COUNTER_LOW, (uint8_t*) &event_counter[0])) 
+    CHK(append_read_register(d,REG_EVENT_COUNTER_HIGH, (uint8_t*) &event_counter[1])) 
+    CHK(append_read_register(d,REG_TRIG_COUNTER_LOW, (uint8_t*) &trig_counter[0])) 
+    CHK(append_read_register(d,REG_TRIG_COUNTER_HIGH,(uint8_t*)  &trig_counter[1])) 
+    CHK(append_read_register(d,REG_TRIG_TIME_LOW,(uint8_t*)  &trig_time[0])) 
+    CHK(append_read_register(d,REG_TRIG_TIME_HIGH,(uint8_t*)  &trig_time[1])) 
+    CHK(append_read_register(d,REG_DEADTIME, (uint8_t*) &deadtime)) 
+    CHK(append_read_register(d,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
+    CHK(append_read_register(d,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
 
     for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
     {
-      CHK(xfer_buffer_read_register(&xfers, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
+      CHK(append_read_register(d, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
     }
     //flush the metadata .  we could get slightly faster throughput by storing metadata 
     //read locations for each buffer and not flushing.
     // If it ends up mattering, I'll change it. 
-    CHK(xfer_buffer_send(&xfers)); 
+    CHK(buffer_send(d)); 
 
 #ifdef DEBUG_PRINTOUTS
     printf("Raw tinfo: %x\n", tinfo) ;
@@ -1191,14 +1165,14 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
     //now start to read the data 
     //switch to waveform mode
-    CHK(xfer_buffer_append(&xfers, buf_mode[MODE_WAVEFORMS],0))
+    CHK(buffer_append(d, buf_mode[MODE_WAVEFORMS],0))
 
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
       if (d->channel_read_mask & (1 << ichan)) //TODO is this backwards?!??? 
       {
-        CHK(xfer_buffer_append(&xfers, buf_channel[ichan],0)) 
-        CHK(loop_over_chunks_half_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ichan]))
+        CHK(buffer_append(d, buf_channel[ichan],0)) 
+        CHK(loop_over_chunks_half_duplex(d, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ichan]))
 //        CHK(loop_over_chunks_full_duplex(&xfers, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ichan]))
       }
       else
@@ -1206,10 +1180,10 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         memset(ev[iout]->data[ichan], 0 , hd[iout]->buffer_length); 
       }
     }
-    CHK(xfer_buffer_append(&xfers, buf_clear[1 << ibuf],0))
+    CHK(buffer_append(d, buf_clear[1 << ibuf],0))
     uint8_t data_status[4]; 
-    CHK(xfer_buffer_read_register(&xfers, REG_CLEAR_STATUS, data_status)) 
-    CHK(xfer_buffer_send(&xfers)) //flush so we can clear the buffer immediately 
+    CHK(append_read_register(d, REG_CLEAR_STATUS, data_status)) 
+    CHK(buffer_send(d)) //flush so we can clear the buffer immediately 
 
     if (data_status[3] & (1 << ibuf))
     {
@@ -1261,9 +1235,8 @@ int nuphase_read(nuphase_dev_t *d,uint8_t* buffer)
 int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st) 
 {
   //TODO: fill in deadtime when I figure out how. 
-  int ixfer = 0; 
   int i; 
-  int wrote; 
+  int ret = 0; 
   struct timespec now; 
   uint8_t wide_scalers[NP_NUM_BEAMS][NP_SPI_BYTES]; 
 
@@ -1274,25 +1247,22 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
 
   _Static_assert (nxfers < 512, "TOO MANY IOC MESSAGES" ); 
 
-  struct spi_ioc_transfer xfers[nxfers];
-  init_xfers(nxfers, xfers,d); 
+  USING(d); 
 
-  xfers[ixfer++].tx_buf = SPI_CAST buf_mode[MODE_REGISTER]; 
-  xfers[ixfer++].tx_buf = SPI_CAST buf_update_scalers; 
+  ret+=buffer_append(d, buf_mode[MODE_REGISTER],0); 
+  ret+=buffer_append(d, buf_update_scalers,0); 
 
   for (i = 0; i < NP_NUM_BEAMS; i++) 
   {
-    xfers[ixfer++].tx_buf = SPI_CAST buf_pick_scaler[i]; 
-    xfers[ixfer++].tx_buf = SPI_CAST buf_set_read_reg[REG_SCALER_READ]; 
-    xfers[ixfer++].rx_buf = SPI_CAST wide_scalers[i]; 
+    ret+=buffer_append(d, buf_pick_scaler[i],0); 
+    ret+=append_read_register(d, REG_SCALER_READ, wide_scalers[i]); 
   }
 
   clock_gettime(CLOCK_REALTIME, &now); 
-  USING(d); 
-  wrote = do_xfer(d->spi_fd, nxfers, xfers); 
+  ret+= buffer_send(d); 
   DONE(d); 
 
-  if (wrote < 0) return wrote; 
+  if (!ret) return ret; 
 
   st->deadtime = 0; //TODO 
   for (i = 0; i < NP_NUM_BEAMS; i++) 
@@ -1589,12 +1559,14 @@ int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock)
 int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs) 
 {
   d->cs_change = cs;
+  setup_xfers(d); 
   return 0; 
 }
 
 int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay) 
 {
   d->delay_us = delay;
+  setup_xfers(d); 
   return 0; 
 }
 
