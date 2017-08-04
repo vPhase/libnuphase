@@ -1578,7 +1578,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
 
 int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock) 
 {
-  d->spi_clock = clock*10000; 
+  d->spi_clock = clock*1000000; 
   USING(d); 
   ioctl(d->spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &d->spi_clock); 
   DONE(d); 
