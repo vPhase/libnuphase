@@ -45,50 +45,51 @@
 //register map 
 typedef enum
 {
-  REG_SET_READ_REG=0x6d, 
-  REG_FIRMWARE_VER=0x01, 
-  REG_FIRMWARE_DATE=0x02, 
-  REG_SCALER_READ = 0x03, 
-  REG_CHIPID_LOW = 0x04,  
-  REG_CHIPID_MID = 0x05,  
-  REG_CHIPID_HI = 0x06,  
-  REG_STATUS = 0x07, 
-  REG_CLEAR_STATUS = 0x09, 
-  REG_EVENT_COUNTER_LOW = 0xa, 
+  REG_FIRMWARE_VER       = 0x01, 
+  REG_FIRMWARE_DATE      = 0x02, 
+  REG_SCALER_READ        = 0x03, 
+  REG_CHIPID_LOW         = 0x04,  
+  REG_CHIPID_MID         = 0x05,  
+  REG_CHIPID_HI          = 0x06,  
+  REG_STATUS             = 0x07, 
+  REG_CLEAR_STATUS       = 0x09, 
+  REG_EVENT_COUNTER_LOW  = 0xa, 
   REG_EVENT_COUNTER_HIGH = 0xb, 
-  REG_TRIG_COUNTER_LOW = 0xc, 
-  REG_TRIG_COUNTER_HIGH = 0xd, 
-  REG_TRIG_TIME_LOW = 0xe, 
-  REG_TRIG_TIME_HIGH = 0xf, 
-  REG_DEADTIME = 0x10, 
-  REG_TRIG_INFO = 0x11,  //bits 23-22 : event buffer ; bit 21: calpulse, bits 19-17: pretrig window,  bits16-15: trig type ; bits 14-0: last beam trigger
-  REG_TRIG_MASKS = 0x12,  // bits 22-15 : channel mask ; bits 14-0 : beam mask
-  REG_BEAM_POWER= 0x14,   // add beam to get right register
-  REG_UPDATE_SCALERS = 0x28, 
-  REG_PICK_SCALER = 0x29, 
-  REG_CALPULSE=0x2a, //cal pulse
-  REG_CHANNEL_MASK=0x30, 
-  REG_ATTEN_012 = 0x32, 
-  REG_ATTEN_345 = 0x33, 
-  REG_ATTEN_67 = 0x34, 
-  REG_ATTEN_APPLY = 0x35, 
-  REG_ADC_CLK_RST = 0x37,  
-  REG_ADC_DELAYS = 0x38, //add buffer number to get all 
-  REG_READ=0x47, //send data to spi miso 
-  REG_FORCE_TRIG=0x40, 
-  REG_CHANNEL=0x41, //select channel to read
-  REG_MODE=0x42, //readout mode
-  REG_RAM_ADDR=0x45, //ram address
-  REG_CHUNK=0x23, //which 32-bit chunk  + i 
-  REG_PRETRIGGER=0x4c, 
-  REG_CLEAR=0x4d, //clear buffers 
-  REG_BUFFER=0x4e,
-  REG_TRIGGER_MASK =0x50, 
-  REG_TRIG_HOLDOFF = 0x51, 
-  REG_TRIG_ENABLE = 0x52, 
-  REG_THRESHOLDS= 0x56, // add the threshold to this to get the right register
-  REG_RESET_COUNTER = 0x7e, 
-  REG_RESET_ALL= 0x7f 
+  REG_TRIG_COUNTER_LOW   = 0xc, 
+  REG_TRIG_COUNTER_HIGH  = 0xd, 
+  REG_TRIG_TIME_LOW      = 0xe, 
+  REG_TRIG_TIME_HIGH     = 0xf, 
+  REG_DEADTIME           = 0x10, 
+  REG_TRIG_INFO          = 0x11, //bits 23-22 : event buffer ; bit 21: calpulse, bits 19-17: pretrig window,  bits16-15: trig type ; bits 14-0: last beam trigger
+  REG_TRIG_MASKS         = 0x12, // bits 22-15 : channel mask ; bits 14-0 : beam mask
+  REG_BEAM_POWER         = 0x14, // add beam to get right register
+  REG_CHUNK              = 0x23, //which 32-bit chunk  + i 
+  REG_SYNC               = 0x27, 
+  REG_UPDATE_SCALERS     = 0x28, 
+  REG_PICK_SCALER        = 0x29, 
+  REG_CALPULSE           = 0x2a, //cal pulse
+  REG_CHANNEL_MASK       = 0x30, 
+  REG_ATTEN_012          = 0x32, 
+  REG_ATTEN_345          = 0x33, 
+  REG_ATTEN_67           = 0x34, 
+  REG_ATTEN_APPLY        = 0x35, 
+  REG_ADC_CLK_RST        = 0x37,  
+  REG_ADC_DELAYS         = 0x38, //add buffer number to get all 
+  REG_FORCE_TRIG         = 0x40, 
+  REG_CHANNEL            = 0x41, //select channel to read
+  REG_MODE               = 0x42, //readout mode
+  REG_RAM_ADDR           = 0x45, //ram address
+  REG_READ               = 0x47         , //send data to spi miso 
+  REG_PRETRIGGER         = 0x4c, 
+  REG_CLEAR              = 0x4d, //clear buffers 
+  REG_BUFFER             = 0x4e,
+  REG_TRIGGER_MASK       = 0x50, 
+  REG_TRIG_HOLDOFF       = 0x51, 
+  REG_TRIG_ENABLE        = 0x52, 
+  REG_THRESHOLDS         = 0x56, // add the threshold to this to get the right register
+  REG_SET_READ_REG       = 0x6d, 
+  REG_RESET_COUNTER      = 0x7e, 
+  REG_RESET_ALL          = 0x7f 
 
 } nuphase_register_t; 
 
@@ -108,6 +109,10 @@ typedef enum
   MODE_BEAMS=2,
   MODE_POWERSUM=3
 } nuphase_readout_mode_t; 
+
+/* For now, allow only one master and slave */ 
+static nuphase_dev_t * the_master = 0; 
+static nuphase_dev_t * the_slave = 0; 
 
 struct nuphase_dev
 {
@@ -139,8 +144,20 @@ struct nuphase_dev
   //spi buffer 
   struct spi_ioc_transfer buf[MAX_XFERS]; 
   int nused; 
+
+  // device state 
+  int current_buf; 
+  int current_mode; 
+
+  // for synchronization
+  uint8_t sync_buf_clear_mask;  // masks ready to clear on this device 
   
 }; 
+
+//some macros 
+#define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
+#define DONE(d)  if (d->enable_locking) pthread_mutex_unlock(&d->mut);
+
 
 //Wrappers for io functions to add printouts 
 static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer) 
@@ -196,10 +213,6 @@ static int do_read(int fd, uint8_t * p)
 
 
 
-//some macros 
-#define USING(d) if (d->enable_locking) pthread_mutex_lock(&d->mut);
-#define DONE(d)  if (d->enable_locking) pthread_mutex_unlock(&d->mut);
-
 // all possible buffers we might batch
 static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
 static uint8_t buf_set_read_reg[NP_NUM_REGISTER][NP_SPI_BYTES];
@@ -213,6 +226,8 @@ static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES];
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
 
 static uint8_t buf_update_scalers[NP_SPI_BYTES] = {REG_UPDATE_SCALERS,0,0,1} ; 
+static uint8_t buf_sync_on[NP_SPI_BYTES] = {REG_SYNC,0,0,1} ; 
+static uint8_t buf_sync_off[NP_SPI_BYTES] = {REG_SYNC,0,0,0} ; 
 static uint8_t buf_reset_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1}; 
 static uint8_t buf_reset_almost_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,2}; 
 static uint8_t buf_reset_adc[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,4}; 
@@ -343,6 +358,138 @@ static int append_read_register(nuphase_dev_t *d, uint8_t address, uint8_t * res
   return ret; 
 }
 
+static int can_synchronize()
+{
+  return the_master && the_slave && the_master->enable_locking && the_slave->enable_locking;
+}
+
+
+
+/* internal synchronized command if reg_to_read_after is not zero, will read a
+ * register after (for example to see if something worked) and store the result
+ * in the appropriate place. 
+ **/ 
+
+static int synchronized_command(const uint8_t * cmd, uint8_t reg_to_read_after,
+                                  uint8_t * result_master, uint8_t * result_slave) {
+  
+  if (!can_synchronize()) 
+  {
+    fprintf(stderr,"WARNING, tried a synchonized command, but not properly set up (%p %p %d %d)\n", 
+        the_master, the_slave,
+        the_master ? the_master->enable_locking : -1,
+        the_slave ? the_slave->enable_locking : -1); 
+
+    return -1; 
+  }
+
+  USING(the_master); 
+  USING(the_slave); 
+  int ret = 0;
+  ret+=buffer_append(the_master, buf_sync_on,0); 
+  ret+=buffer_append(the_master, cmd,0); 
+  ret+=buffer_send(the_master); 
+  ret+=buffer_append(the_slave, cmd,0); 
+  ret+=buffer_send(the_slave); 
+  ret+=buffer_append(the_master, buf_sync_off,0); 
+  if (reg_to_read_after) 
+  {
+    ret+=append_read_register(the_master, reg_to_read_after, result_master); 
+  }
+  ret+=buffer_send(the_master); 
+
+  if (reg_to_read_after) 
+  {
+    ret+=append_read_register(the_slave, reg_to_read_after, result_slave); 
+    ret+=buffer_send(the_slave); 
+  }
+
+  DONE(the_slave); 
+  DONE(the_master); 
+  return ret; 
+}
+
+static int mark_buffer_done(nuphase_dev_t * d,  int ibuf)
+{
+
+  if (d == the_master && can_synchronize()) 
+  {
+    //atomic operation
+    __sync_fetch_and_or(&the_master->sync_buf_clear_mask, 1 << ibuf); 
+  }
+  else if (d == the_slave && can_synchronize()) 
+  {
+    //atomic operation
+    __sync_fetch_and_or(&the_slave->sync_buf_clear_mask, 1 << ibuf); 
+  }
+  else //no synchronization needed, this is just the old code
+  {
+
+    USING(d); 
+    int ret = 0; 
+    uint8_t data_status[4]; 
+    ret += buffer_append(d, buf_clear[1 << ibuf],0); 
+    ret+=append_read_register(d, REG_CLEAR_STATUS, data_status); 
+    ret+=buffer_send(d); //flush so we can clear the buffer immediately 
+    if (data_status[3] & (1 << ibuf))
+    {
+      fprintf(stderr,"Did not clear buffer %d ? (or rate too high? buf mask after clearing: %x))\n", ibuf, data_status[3] & 0xf) ; 
+      easy_break_point(); 
+    }
+    DONE(d); 
+    return ret; 
+  }
+
+  uint8_t can_clear = the_master->sync_buf_clear_mask & the_slave->sync_buf_clear_mask; 
+
+  while(can_clear) 
+  {
+    //get the lowest bit
+    int buf2clr = __builtin_ctz(can_clear);
+
+    uint8_t cleared_master[4]; 
+    uint8_t cleared_slave[4]; 
+    int ret = synchronized_command(buf_clear[1 << buf2clr], REG_CLEAR_STATUS, cleared_master, cleared_slave); 
+    if (!ret)
+    {
+      if (cleared_master[3] & ( 1 << buf2clr))
+      {
+        fprintf(stderr,"Did not clear buffer %d for master ? (or rate too high? buf mask after clearing: %x))\n", buf2clr, cleared_master[3] & 0xf) ; 
+        easy_break_point(); 
+      }
+
+      if (cleared_slave[3] & ( 1 << buf2clr))
+      {
+        fprintf(stderr,"Did not clear buffer %d for master ? (or rate too high? buf mask after clearing: %x))\n", buf2clr, cleared_slave[3] & 0xf) ; 
+        easy_break_point(); 
+      }
+
+      if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
+      {
+        //TODO this might occassionally legimitately happen? maybe? 
+        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
+        easy_break_point(); 
+      }
+    //clear the bit
+     can_clear&=~(1 << buf2clr); 
+      __sync_fetch_and_and(&the_slave->sync_buf_clear_mask, ~(1 << buf2clr)); 
+      __sync_fetch_and_and(&the_master->sync_buf_clear_mask, ~(1 << buf2clr)); 
+    }
+    else
+    {
+      fprintf(stderr,"Problem clearing stuff :(\n"); 
+      return ret; 
+    }
+  }
+
+  return 0;
+}
+
+
+
+
+
+
 static int loop_over_chunks_half_duplex(nuphase_dev_t * d, uint8_t naddr, uint8_t start_address, uint8_t * result) 
 {
 
@@ -409,7 +556,9 @@ int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t 
             // we don't lock before these because there is no way we sent enough transfers to trigger a read 
             //
   ret += buffer_append(d, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
+  d->current_mode = MODE_WAVEFORMS; 
   ret += buffer_append(d, buf_buffer[buffer], 0);  if (ret) return 0; 
+  d->current_buf = buffer; 
   ret += buffer_append(d, buf_channel[channel], 0);  if (ret) return 0; 
   ret += loop_over_chunks_half_duplex(d, naddress, start, data);
   if(!ret) ret = buffer_send(d); //pick up the stragglers. 
@@ -436,10 +585,23 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 int nuphase_sw_trigger(nuphase_dev_t * d ) 
 {
   const uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, 1};  
-  int ret; 
-  USING(d); 
-  ret = do_write(d->spi_fd, buf); 
-  DONE(d); 
+  int ret = 0; 
+
+  if (d) 
+  {
+    USING(d); 
+    ret = do_write(d->spi_fd, buf); 
+    DONE(d); 
+  }
+
+  else if(can_synchronize())
+  {
+    ret = synchronized_command(buf,0,0,0); 
+  }
+  else
+  {
+    return -1; 
+  }
   return ret == NP_SPI_BYTES ? 0 : -1;  
 }
 
@@ -474,6 +636,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   if (locked < 0) 
   {
     fprintf(stderr,"Could not get exclusive access to %s\n", devicename); 
+    close(fd); 
     return 0; 
   }
 
@@ -486,6 +649,8 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   dev->next_read_buffer = 0; 
   dev->cs_change =NP_CS_CHANGE; 
   dev->delay_us =NP_DELAY_USECS; 
+  dev->current_buf = -1; 
+  dev->current_mode = -1; 
 
   if (gpio) 
   {
@@ -529,6 +694,41 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
     pthread_mutex_init(&dev->wait_mut,0); 
   }
 
+
+  //check if this is a master or not
+  uint8_t fwver[4]; 
+  nuphase_read_register(dev, REG_FIRMWARE_VER, fwver); 
+  if (fwver[1])
+  {
+    if (the_master)
+    {
+      fprintf(stderr,"This is a master device, but a master device is already open!!!\n"); 
+      nuphase_close(dev); 
+      return 0;
+    }
+    else
+    {
+      the_master = dev; 
+    }
+
+    //set some things related to being master
+  }
+  else
+  {
+    if (the_slave) 
+    {
+      fprintf(stderr,"This is a slave device, but a slave device is already open!!!\n"); 
+      nuphase_close(dev); 
+      return 0;
+    }
+    else
+    {
+      the_slave = dev; 
+    }
+    //set some things related to being slave
+  }
+
+
   if (nuphase_reset(dev, &dev->cfg,NP_RESET_COUNTERS)) 
   {
     fprintf(stderr,"Unable to reset device... "); 
@@ -537,6 +737,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   }
 
   return dev; 
+
 }
 
 void nuphase_set_board_id(nuphase_dev_t * d, uint8_t id)
@@ -589,6 +790,7 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   DONE(d); 
   info->ver.major = version[3] >>4 ; 
   info->ver.minor = version[3] & 0x0f; 
+  info->ver.master = version[1] & 1; 
   info->date.day = date[3] & 0xff; 
   info->date.month = date[2] & 0xf; 
   info->date.year = (date[2] >> 4) + (date[1] << 4); 
@@ -950,7 +1152,6 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
     uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
 
 
-
     ret += buffer_append(d,attenuation_012,0); 
     ret += buffer_append(d, attenuation_345,0); 
     ret += buffer_append(d, attenuation_067,0); 
@@ -1099,6 +1300,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     d->event_counter++; 
     d->next_read_buffer = (d->next_read_buffer + 1) %NP_NUM_BUFFER; 
     CHK(buffer_append(d, buf_buffer[ibuf],0)) 
+    d->current_buf = ibuf; 
 
     /**Grab metadata! */ 
     //switch to register mode  
@@ -1122,6 +1324,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     //read locations for each buffer and not flushing.
     // If it ends up mattering, I'll change it. 
     CHK(buffer_send(d)); 
+    DONE(d);//yield  
 
 #ifdef DEBUG_PRINTOUTS
     printf("Raw tinfo: %x\n", tinfo) ;
@@ -1201,11 +1404,20 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
 
     //now start to read the data 
-    //switch to waveform mode
-    CHK(buffer_append(d, buf_mode[MODE_WAVEFORMS],0))
-
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
+      USING(d);  
+      if (d->current_mode != MODE_WAVEFORMS)
+      {
+        CHK(buffer_append(d, buf_mode[MODE_WAVEFORMS],0))
+        d->current_mode = MODE_WAVEFORMS; 
+      }
+
+      if (d->current_buf != ibuf)
+      {
+        CHK(buffer_append(d, buf_mode[MODE_WAVEFORMS],0))
+      }
+
       if (d->channel_read_mask & (1 << ichan)) //TODO is this backwards?!??? 
       {
         CHK(buffer_append(d, buf_channel[ichan],0)) 
@@ -1216,26 +1428,18 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       {
         memset(ev[iout]->data[ichan], 0 , hd[iout]->buffer_length); 
       }
+      DONE(d); 
     }
-    //TODO handle synchronized read properly 
-    CHK(buffer_append(d, buf_clear[1 << ibuf],0))
-    uint8_t data_status[4]; 
-    CHK(append_read_register(d, REG_CLEAR_STATUS, data_status)) 
-    CHK(buffer_send(d)) //flush so we can clear the buffer immediately 
 
-    if (data_status[3] & (1 << ibuf))
-    {
-      fprintf(stderr,"Did not clear buffer %d ? (or rate too high? buf mask at readout: %x, buf mask after clearing: %x))\n", ibuf, mask, data_status[3] & 0xf) ; 
-      easy_break_point(); 
-    }
+    mark_buffer_done(d, ibuf); 
 
     iout++; 
-    DONE(d); //give other things a chance to use the lock 
   }
 
 
   the_end:
   //TODO add some printout here in case of falure/ 
+  //also, need to unlock mutex if it's locked 
 
   return ret; 
 }
@@ -1282,6 +1486,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
 
   USING(d); 
   ret+=buffer_append(d, buf_mode[MODE_REGISTER],0); 
+  d->current_mode = MODE_REGISTER; 
   ret+=buffer_append(d, buf_update_scalers,0); 
 
   for (i = 0; i < NP_NUM_BEAMS; i++) 
@@ -1547,12 +1752,16 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c, nuphase_reset_t
     if (!happy) return -1; 
   }
 
-  //sync up the next buffer by sending a software trigger... then clearing it 
-
+  //make sure we are starting on buffer zero
   nuphase_check_buffers(d, &d->hardware_next); 
-  d->next_read_buffer = d->hardware_next; 
+  while (d->hardware_next)
+  {
+    nuphase_sw_trigger(d); 
+    nuphase_check_buffers(d, &d->hardware_next); 
+    nuphase_clear_buffer(d,0xf); 
+  }
+  
 //  printf("Starting on buffer: %d\n", d->next_read_buffer); 
- 
 
 
   //then reset the counters, measuring the time before and after 

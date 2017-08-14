@@ -68,6 +68,7 @@ typedef struct nuphase_fwinfo
   {
     unsigned major : 4; 
     unsigned minor : 4; 
+    unsigned master: 1; 
   } ver; 
 
   struct
@@ -126,8 +127,7 @@ typedef enum nuphase_reset_type
  *
  * @param cfg    If non-zero, this config is used instead of the default initial one.
  * @param lock_access  If non-zero a mutex will be initialized that will control concurrent access to this
- *
- * device from multiple threads 
+ * device from multiple threads. This also enables synchronization of sw triggers / buffer clears.  
  *
  * @returns a pointer to the file descriptor, or 0 if something went wrong. 
  */
@@ -175,7 +175,9 @@ void nuphase_set_buffer_length(nuphase_dev_t *d, uint16_t buffer);
 uint16_t nuphase_get_buffer_length(const nuphase_dev_t *d); 
 
 
-/** Send a software trigger to the device */ 
+/** Send a software trigger to the device
+ * @param d the device to send a trigger to, if 0, will send to both master and slave if they both exist and have locking enabled. 
+ **/ 
 int nuphase_sw_trigger(nuphase_dev_t * d); 
 
 /** Change the state of the calpulser */ 
