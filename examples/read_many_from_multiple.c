@@ -69,7 +69,10 @@ void * read_device(void * args )
 
     for (i = 0;i < ntrigs; i++)
     {
-        nuphase_sw_trigger(dev); 
+        if (bid == 1) //only do this on first board
+        {
+          nuphase_sw_trigger(0); // 0 
+        }
     }
 
     int nevents = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev); 
