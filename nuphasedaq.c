@@ -84,6 +84,8 @@ typedef enum
   REG_CLEAR=0x4d, //clear buffers 
   REG_BUFFER=0x4e,
   REG_TRIGGER_MASK =0x50, 
+  REG_TRIG_HOLDOFF = 0x51, 
+  REG_TRIG_ENABLE = 0x52, 
   REG_THRESHOLDS= 0x56, // add the threshold to this to get the right register
   REG_RESET_COUNTER = 0x7e, 
   REG_RESET_ALL= 0x7f 
@@ -133,8 +135,11 @@ struct nuphase_dev
   // store event / header used for calibration here in case we want it later? 
   nuphase_event_t calib_ev; 
   nuphase_header_t calib_hd; 
+
+  //spi buffer 
   struct spi_ioc_transfer buf[MAX_XFERS]; 
   int nused; 
+  
 }; 
 
 //Wrappers for io functions to add printouts 
@@ -430,7 +435,7 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result)
 
 int nuphase_sw_trigger(nuphase_dev_t * d ) 
 {
-  uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, 1};  
+  const uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, 1};  
   int ret; 
   USING(d); 
   ret = do_write(d->spi_fd, buf); 
@@ -627,6 +632,7 @@ int nuphase_close(nuphase_dev_t * d)
 
     d->enable_locking = 0; 
   }
+
 
   ret += flock(d->spi_fd, LOCK_UN); 
   ret += 4*close(d->spi_fd); 
@@ -955,7 +961,6 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
     {
       //success! 
       memcpy(d->cfg.attenuation, c->attenuation, sizeof(c->attenuation)); 
-
     }
     else
     {
@@ -965,6 +970,38 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force )
 
   }
 
+  if (force || c->trigger != d->cfg.trigger)
+  {
+    uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, 0, c->trigger}; 
+
+    written = do_write(d->spi_fd, trigger_enable_buf); 
+    if (written == NP_SPI_BYTES) 
+    {
+      d->cfg.trigger = c->trigger; 
+    }
+    else
+    {
+      ret = -1; //don't try to continue if we fail . 
+      goto configure_end; 
+    }
+  }
+
+  if (force || c->trigger_holdoff != d->cfg.trigger_holdoff)
+  {
+    uint8_t trigger_holdoff_buf[NP_SPI_BYTES] = {REG_TRIG_HOLDOFF, 0, 0, c->trigger_holdoff}; 
+
+    written = do_write(d->spi_fd, trigger_holdoff_buf); 
+    if (written == NP_SPI_BYTES) 
+    {
+      d->cfg.trigger_holdoff = c->trigger_holdoff; 
+    }
+    else
+    {
+      ret = -1; //don't try to continue if we fail . 
+      goto configure_end; 
+    }
+
+  }
   configure_end: 
 
   DONE(d); 
@@ -1180,6 +1217,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         memset(ev[iout]->data[ichan], 0 , hd[iout]->buffer_length); 
       }
     }
+    //TODO handle synchronized read properly 
     CHK(buffer_append(d, buf_clear[1 << ibuf],0))
     uint8_t data_status[4]; 
     CHK(append_read_register(d, REG_CLEAR_STATUS, data_status)) 
@@ -1242,13 +1280,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st)
 
   st->board_id = d->board_id; 
 
-  //cheating  because const int is apparently not constant in C
-  enum {nxfers = 1 + 1 + NP_NUM_BEAMS * 3};   //one set mode register, one update scalers, num_beams *  ( pick scaler, read register, read) 
-
-  _Static_assert (nxfers < 512, "TOO MANY IOC MESSAGES" ); 
-
   USING(d); 
-
   ret+=buffer_append(d, buf_mode[MODE_REGISTER],0); 
   ret+=buffer_append(d, buf_update_scalers,0); 
 

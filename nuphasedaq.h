@@ -32,6 +32,15 @@ typedef struct nuphase_dev nuphase_dev_t;
 /** a bitmask indicating which buffers are available */ 
 typedef uint8_t nuphase_buffer_mask_t;
 
+typedef enum nuphase_trigger_enable
+{
+  NP_TRIGGER_BEAMFORMING = 1, 
+  NP_TRIGGER_EXTIN       = 2, 
+  NP_TRIGGER_EXTOUT      = 4 
+} nuphase_trigger_enable_t; 
+
+
+
 /** Configuration options, sent to fpga  with configure. 
  * Only values different from previously sent config will be sent
  * Use nuphase_config_init to fill with default values if you want. 
@@ -40,9 +49,12 @@ typedef struct nuphase_config
 {
  uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
  uint16_t trigger_mask;                     //!< Which triggers to use, default is all (0xffffff) 
- uint8_t  attenuation[NP_NUM_CHAN];         //!   
+ uint8_t  attenuation[NP_NUM_CHAN];         //!< per-channel attenuation
  uint8_t  channel_mask;                     //!< Which channels to use, default is all (0xff)
- uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 85 samples)  (3 bits);  
+ nuphase_trigger_enable_t trigger;                  //!< Which trigger enables to use 
+ uint8_t trigger_holdoff;                   //!< Trigger holdoff
+ uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 128 samples)  (3 bits);  
+ nuphase_dev_t * master;                     
 } nuphase_config_t; 
 
 /** Fill the config with default options */
@@ -76,6 +88,7 @@ typedef enum nuphase_reset_type
   NP_RESET_ALMOST_GLOBAL, //!< everything but register settings 
   NP_RESET_GLOBAL    //! everything 
 } nuphase_reset_t; 
+
 
 
 /** \brief Open a nuphase phased array board and initializes it. 
@@ -121,7 +134,7 @@ typedef enum nuphase_reset_type
 nuphase_dev_t * nuphase_open(const char * spi_device_name,
                              const char * gpio_interrupt_device_name, 
                              const nuphase_config_t * cfg,
-                             int lock_access); 
+                             int lock_access) ; 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
