@@ -702,30 +702,26 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   {
     if (the_master)
     {
-      fprintf(stderr,"This is a master device, but a master device is already open!!!\n"); 
-      nuphase_close(dev); 
-      return 0;
+      fprintf(stderr,"Warning: This is a master device, but a master device is already open!!! Ignore if not trying to sync two boards.\n"); 
     }
     else
     {
       the_master = dev; 
     }
 
-    //set some things related to being master
+    //set some things related to being master? 
   }
   else
   {
     if (the_slave) 
     {
-      fprintf(stderr,"This is a slave device, but a slave device is already open!!!\n"); 
-      nuphase_close(dev); 
-      return 0;
+      fprintf(stderr,"Warning: This is a slave device, but a slave device is already open!!! Ignore if not trying to sync two boards.\n"); 
     }
     else
     {
       the_slave = dev; 
     }
-    //set some things related to being slave
+    //set some things related to being slave? 
   }
 
 
