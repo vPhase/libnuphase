@@ -177,6 +177,8 @@ uint16_t nuphase_get_buffer_length(const nuphase_dev_t *d);
 
 /** Send a software trigger to the device
  * @param d the device to send a trigger to, if 0, will send to both master and slave if they both exist and have locking enabled. 
+ *
+ * WARNING: if you are reading two boards in a master / slave configuration and send a sw trigger to just one device, they will probably go out of sync causing problems. 
  **/ 
 int nuphase_sw_trigger(nuphase_dev_t * d); 
 
