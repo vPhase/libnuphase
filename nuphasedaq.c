@@ -360,7 +360,7 @@ static int append_read_register(nuphase_dev_t *d, uint8_t address, uint8_t * res
 
 static int can_synchronize()
 {
-  return the_master && the_slave && the_master->enable_locking && the_slave->enable_locking;
+  return the_master && the_slave;
 }
 
 
@@ -375,10 +375,8 @@ static int synchronized_command(const uint8_t * cmd, uint8_t reg_to_read_after,
   
   if (!can_synchronize()) 
   {
-    fprintf(stderr,"WARNING, tried a synchonized command, but not properly set up (%p %p %d %d)\n", 
-        the_master, the_slave,
-        the_master ? the_master->enable_locking : -1,
-        the_slave ? the_slave->enable_locking : -1); 
+    fprintf(stderr,"WARNING, tried a synchonized command, but not properly set up (%p %p)\n", 
+        the_master, the_slave); 
 
     return -1; 
   }
@@ -692,36 +690,35 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   {
     pthread_mutex_init(&dev->mut,0); 
     pthread_mutex_init(&dev->wait_mut,0); 
-  }
 
-
-  //check if this is a master or not
-  uint8_t fwver[4]; 
-  nuphase_read_register(dev, REG_FIRMWARE_VER, fwver); 
-  if (fwver[1])
-  {
-    if (the_master)
+    //check if this is a master or slave if locking is enabled
+    uint8_t fwver[4]; 
+    nuphase_read_register(dev, REG_FIRMWARE_VER, fwver); 
+    if (fwver[1])
     {
-      fprintf(stderr,"Warning: This is a master device, but a master device is already open!!! Ignore if not trying to sync two boards.\n"); 
+      if (the_master)
+      {
+        fprintf(stderr,"Warning: This is a master device, but a master device is already open!!! Ignore if not trying to sync two boards.\n"); 
+      }
+      else
+      {
+        the_master = dev; 
+      }
+
+      //set some things related to being master? 
     }
     else
     {
-      the_master = dev; 
+      if (the_slave) 
+      {
+        fprintf(stderr,"Warning: This is a slave device, but a slave device is already open!!! Ignore if not trying to sync two boards.\n"); 
+      }
+      else
+      {
+        the_slave = dev; 
+      }
+      //set some things related to being slave? 
     }
-
-    //set some things related to being master? 
-  }
-  else
-  {
-    if (the_slave) 
-    {
-      fprintf(stderr,"Warning: This is a slave device, but a slave device is already open!!! Ignore if not trying to sync two boards.\n"); 
-    }
-    else
-    {
-      the_slave = dev; 
-    }
-    //set some things related to being slave? 
   }
 
 

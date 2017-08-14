@@ -123,18 +123,19 @@ typedef enum nuphase_reset_type
  * @param spi_device_name The SPI device (likely something like /sys/bus/spi/devices/spi1.0 )
  *
  * @param gpio_interrupt_device_name The GPIO device acting as an interrupt (e.g. /dev/uio0).
- *                                    This is purely optional, if not defined, we will busy wait. 
+ *                                    This is purely optional, if not defined, we will busy wait. Also this has never been tested. 
  *
  * @param cfg    If non-zero, this config is used instead of the default initial one.
- * @param lock_access  If non-zero a mutex will be initialized that will control concurrent access to this
- * device from multiple threads. This also enables synchronization of sw triggers / buffer clears.  
+ * @param sync_access  If non-zero a mutex will be initialized that will control concurrent access 
+ *                     to this device from multiple threads. ALSO ENABLES MASTER/SLAVE MODE ( enables synchronization of sw triggers / buffer clears) . 
+ *
  *
  * @returns a pointer to the file descriptor, or 0 if something went wrong. 
  */
 nuphase_dev_t * nuphase_open(const char * spi_device_name,
                              const char * gpio_interrupt_device_name, 
                              const nuphase_config_t * cfg,
-                             int lock_access) ; 
+                             int sync_access) ; 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
