@@ -5,21 +5,23 @@
 #include <assert.h>
 #include <sys/time.h> 
 #include <stdlib.h>
-#include <pthread.h> 
 
 // read_many_from_multiple spidev [spidev2] 
 
+#define MAXDEV 2
 volatile static int stop = 0; 
 
 static int ndevices = 0; 
-static nuphase_dev_t* devices[128] = {0}; 
-
+static nuphase_dev_t* devices[MAXDEV] = {0}; 
+static FILE * fhd[MAXDEV] = {0}; 
+static FILE * fev[MAXDEV] = {0}; 
+nuphase_header_t hd[MAXDEV][4]; 
+nuphase_event_t ev[MAXDEV][4]; 
+int bid[MAXDEV]; 
 
 static void catch_interrupt(int signo)
 {
-
   printf("Caught interrupt...\n"); 
-
 
   int i; 
   for (i = 0; i < ndevices; i++)
@@ -33,68 +35,6 @@ static void catch_interrupt(int signo)
 
 
 
-
-void * read_device(void * args )
-{
-
-  nuphase_header_t hd[4]; 
-  nuphase_event_t ev[4]; 
-
-  nuphase_dev_t *dev =  (nuphase_dev_t*) args; 
-  int bid = nuphase_get_board_id(dev); 
-
-  char buf[128]; 
-  sprintf(buf,"bd%d_headers.dat",bid); 
-  FILE * fhd = fopen( buf ,"w"); 
-  sprintf(buf,"bd%d_events.dat", bid); 
-  FILE * fev = fopen( buf ,"w"); 
-
-
-
-  nuphase_set_readout_number_offset(dev,0); 
-
-  printf("Starting event loop on board %d... ctrl-c to cancel!\n",bid); 
-
-  int nev = 0; 
-  struct timespec start; 
-  struct timespec now; 
-
-  clock_gettime(CLOCK_REALTIME,&start); 
-  clock_gettime(CLOCK_REALTIME,&now); 
-
-  while (!stop)
-  {
-    int ntrigs = 1 + (now.tv_nsec / 10000 ) % 4; 
-    int i; 
-
-    for (i = 0;i < ntrigs; i++)
-    {
-        if (bid == 1) //only do this on first board
-        {
-          nuphase_sw_trigger(0); // 0 
-        }
-    }
-
-    int nevents = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev); 
-    clock_gettime(CLOCK_REALTIME,&now); 
-    nev+= nevents; 
-    double hz = nev / (now.tv_sec - start.tv_sec + now.tv_nsec *1.e-9 - start.tv_nsec*1.e-9); 
-    printf("BD%d: Just read %d events (sent %d, total= %d, avg rate = %f Hz)\n",bid, nevents, ntrigs, nev, hz); 
-
-    for (i = 0; i < nevents; i++)
-    {
-      nuphase_event_write(fev,&ev[i]); 
-      nuphase_header_write(fhd,&hd[i]); 
-
-    }
-  }
-
-  nuphase_close(dev); 
-  fclose(fhd); 
-  fclose(fev); 
-  return 0; 
-
-}
 
 int main(int nargs, char ** args) 
 {
@@ -114,19 +54,76 @@ int main(int nargs, char ** args)
   saction.sa_handler = catch_interrupt; 
   sigaction(SIGINT, &saction,0); 
 
-  pthread_t threads[nargs-1]; 
-  int i; 
-  for (i = 1; i < nargs; i++)
+
+  int iarg; 
+  ndevices = nargs-1;
+
+  for (iarg = 1; iarg <nargs; iarg++)
   {
-     devices[ndevices] = nuphase_open(args[i], 0,0,1); 
-     pthread_create(&threads[i-1],0,read_device,devices[ndevices]); 
-     ndevices++; 
+    devices[iarg-1] = nuphase_open(args[iarg],0,0,1); //enable locking 
+
+    bid[iarg-1] = nuphase_get_board_id(devices[iarg-1]); 
+    char buf[128]; 
+    sprintf(buf,"bd%d_headers.dat",bid[iarg-1]); 
+    fhd[iarg-1] = fopen( buf ,"w"); 
+    sprintf(buf,"bd%d_events.dat", bid[iarg-1]); 
+    fev[iarg-1] = fopen( buf ,"w"); 
+    nuphase_set_readout_number_offset(devices[iarg-1],0); 
+    nuphase_set_toggle_chipselect(devices[iarg-1],0); 
+    nuphase_set_spi_clock(devices[iarg-1],20); 
   }
 
-  for (i = 0; i < nargs-1; i++)
+
+
+
+
+
+  int nev[MAXDEV] = {0}; 
+  struct timespec start; 
+  struct timespec now; 
+
+  clock_gettime(CLOCK_REALTIME,&start); 
+  clock_gettime(CLOCK_REALTIME,&now); 
+
+  int ibd; 
+  printf("Starting event loop with %d devices... ctrl-c to cancel!\n",ndevices); 
+  while (!stop)
   {
-    pthread_join(threads[i],0);
-    printf("Done with thread %d\n",i); 
+    int ntrigs = 1 + (now.tv_nsec / 10000 ) % 4; 
+    int i; 
+
+
+    for (i = 0;i < ntrigs; i++)
+    {
+      nuphase_sw_trigger(0); // 0 
+    }
+
+
+    for (ibd = 0; ibd < ndevices; ibd++)
+    {
+
+      if (stop) break; 
+      nuphase_dev_t * dev = devices[ibd]; 
+      int nevents = nuphase_wait_for_and_read_multiple_events(dev,  &hd[ibd], &ev[ibd]); 
+      clock_gettime(CLOCK_REALTIME,&now); 
+      nev[ibd]+= nevents; 
+      double hz = nev[ibd] / (now.tv_sec - start.tv_sec + now.tv_nsec *1.e-9 - start.tv_nsec*1.e-9); 
+      printf("BD%d: Just read %d events (sent %d, total= %d, avg rate = %f Hz)\n",bid[ibd], nevents, ntrigs, nev[ibd], hz); 
+
+      for (i = 0; i < nevents; i++)
+      {
+        nuphase_event_write(fev[ibd],&ev[ibd][i]); 
+        nuphase_header_write(fhd[ibd],&hd[ibd][i]); 
+      }
+    }
+  }
+
+
+  for (ibd = 0; ibd < ndevices; ibd++)
+  {
+    nuphase_close(devices[ibd]); 
+    fclose(fhd[ibd]); 
+    fclose(fev[ibd]); 
   }
 
   return 0; 
