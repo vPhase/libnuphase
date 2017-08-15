@@ -448,6 +448,7 @@ static int mark_buffer_done(nuphase_dev_t * d,  int ibuf)
     uint8_t cleared_master[4]; 
     uint8_t cleared_slave[4]; 
     int ret = synchronized_command(buf_clear[1 << buf2clr], REG_CLEAR_STATUS, cleared_master, cleared_slave); 
+//    printf("Clearing %d on both\n", buf2clr); 
     if (!ret)
     {
       if (cleared_master[3] & ( 1 << buf2clr))
@@ -464,7 +465,7 @@ static int mark_buffer_done(nuphase_dev_t * d,  int ibuf)
 
       if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
       {
-        //TODO this might occassionally legimitately happen? maybe? 
+        //TODO this might occasionally legimitately happen? maybe? 
         fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
         easy_break_point(); 
       }
@@ -676,6 +677,9 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
   if (c) dev->cfg = *c; 
   else nuphase_config_init(&dev->cfg); 
 
+  //make sure sync is off 
+  do_write(dev->spi_fd, buf_sync_off); 
+
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->readout_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
@@ -704,6 +708,7 @@ nuphase_dev_t * nuphase_open(const char * devicename, const char * gpio,
       {
         the_master = dev; 
       }
+
 
       //set some things related to being master? 
     }
