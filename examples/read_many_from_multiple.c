@@ -70,7 +70,7 @@ int main(int nargs, char ** args)
     fev[iarg-1] = fopen( buf ,"w"); 
     nuphase_set_readout_number_offset(devices[iarg-1],0); 
     nuphase_set_toggle_chipselect(devices[iarg-1],0); 
-    nuphase_set_spi_clock(devices[iarg-1],20); 
+//    nuphase_set_spi_clock(devices[iarg-1],20); 
   }
 
 
@@ -89,7 +89,7 @@ int main(int nargs, char ** args)
   printf("Starting event loop with %d devices... ctrl-c to cancel!\n",ndevices); 
   while (!stop)
   {
-    int ntrigs = 1 + (now.tv_nsec / 10000 ) % 4; 
+    int ntrigs =0;// 1 + (now.tv_nsec / 10000 ) % 1; 
     int i; 
 
 
