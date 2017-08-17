@@ -1060,6 +1060,9 @@ void nuphase_config_init(nuphase_config_t * c)
   {
     c->attenuation[i] = 0;  //TODO make this more sensible by default 
   }
+
+  c->trigger = NP_TRIGGER_EXTIN | NP_TRIGGER_BEAMFORMING; 
+
 }
 
 
