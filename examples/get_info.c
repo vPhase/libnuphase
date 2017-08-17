@@ -31,6 +31,7 @@ int main(int nargs, char ** args)
   {
     printf("FW VER: %u.%u\n",fw.ver.major, fw.ver.minor); 
     printf("FW DATE: %u-%u-%u\n",fw.date.year, fw.date.month, fw.date.day); 
+    printf("MASTER? %d\n", fw.ver.master); 
     printf("BOARD DNA: 0x %" PRIu64 "\n",fw.dna); 
   }
 
