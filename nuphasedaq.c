@@ -794,9 +794,9 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info)
   info->date.year = (date[2] >> 4) + (date[1] << 4); 
 
   //TODO check this logic. not sure endianness is correct
-  uint64_t dna_low_big =  dna_low[3] | dna_low[2] << 8 || dna_low[1] << 8;
-  uint64_t dna_mid_big =  dna_mid[3] | dna_mid[2] << 8 || dna_mid[1] << 8;
-  uint64_t dna_hi_big =  dna_hi[3] | dna_hi[2] << 8 ;
+  uint64_t dna_low_big =  ((uint64_t) dna_low[3]) | ((uint64_t) dna_low[2]) << 8 || ((uint64_t) dna_low[1]) << 16;
+  uint64_t dna_mid_big =  ((uint64_t) dna_mid[3]) | ((uint64_t) dna_mid[2]) << 8 || ((uint64_t) dna_mid[1]) << 16;
+  uint64_t dna_hi_big =   ((uint64_t) dna_hi[3])  | ((uint64_t)dna_hi[2]) << 8 ;
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
 
   return ret; 
