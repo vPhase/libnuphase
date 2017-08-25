@@ -5,8 +5,8 @@
 
 //these need to be incremented if the structs change incompatibly
 //and then generic_*_read must be updated to delegate appropriately. 
-#define NUPHASE_HEADER_VERSION 1 
-#define NUPHASE_EVENT_VERSION 1 
+#define NUPHASE_HEADER_VERSION 2 
+#define NUPHASE_EVENT_VERSION 2 
 #define NUPHASE_STATUS_VERSION 0 
 
 #define NUPHASE_HEADER_MAGIC 0xa1 
@@ -140,29 +140,59 @@ typedef struct nuphase_header_v0
   uint8_t calpulser;                             
 } nuphase_header_v0_t; 
 
+typedef struct nuphase_header_v1
+{
+  uint64_t event_number;         
+  uint64_t readout_number;         
+  uint64_t trig_number;                          
+  uint16_t buffer_length;                        
+  uint16_t pretrigger_samples;                   
+  uint32_t readout_time;                         
+  uint32_t readout_time_ns;                      
+  uint64_t trig_time;                            
+  uint32_t approx_trigger_time;                  
+  uint32_t approx_trigger_time_nsecs;            
+  uint16_t triggered_beams;                      
+  uint16_t beam_mask;                            
+  uint32_t beam_power[NP_NUM_BEAMS];             
+  uint32_t deadtime;                             
+  uint8_t buffer_number;                         
+  uint8_t channel_mask;                          
+  uint8_t channel_overflow;                      
+  uint8_t buffer_mask;                           
+  uint8_t board_id;                              
+  nuphase_trig_type_t trig_type;                 
+  uint8_t calpulser;                             
+} nuphase_header_v1_t; 
+
 
 /* Offsets from start of structs for headers */ 
-const int nuphase_header_sizes []=  { sizeof(nuphase_header_v0_t), sizeof(nuphase_header_t) }; 
+const int nuphase_header_sizes []=  { sizeof(nuphase_header_v0_t), sizeof(nuphase_header_v1_t), sizeof(nuphase_header_t) }; 
 
 
 typedef struct nuphase_event_v0
 {
-  uint64_t readout_number; 
+  uint64_t event_number; 
   uint16_t buffer_length; 
   uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; 
   uint8_t board_id;     
 } nuphase_event_v0_t; 
 
+typedef struct nuphase_event_v1
+{
+  uint64_t event_number; 
+  uint64_t readout_number; 
+  uint16_t buffer_length; 
+  uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; 
+  uint8_t board_id;     
+} nuphase_event_v1_t; 
+
+
+
 
 static void convert_header(int version, nuphase_header_t * new_header, const void * old_header) 
 {
-  if (version == 0) 
-  {
-        const nuphase_header_v0_t * h = (const nuphase_header_v0_t*) old_header; 
-        new_header->event_number = h->event_number; 
-        memcpy(&new_header->readout_number, h, sizeof(*h)); 
-  }
-  else if (version == NUPHASE_HEADER_VERSION) 
+  if (version == NUPHASE_HEADER_VERSION) 
   {
       memcpy(new_header,old_header,sizeof(*new_header)); 
   }
@@ -264,20 +294,26 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
 {
   struct packet_start start; 
   int written; 
-  int i; 
+  int i,ibd; 
   start.magic = NUPHASE_EVENT_MAGIC; 
   start.ver = NUPHASE_EVENT_VERSION; 
 
   start.cksum = stupid_fletcher16(sizeof(ev->event_number), &ev->event_number); 
-  start.cksum = stupid_fletcher16_append(sizeof(ev->readout_number), &ev->readout_number, start.cksum); 
   start.cksum = stupid_fletcher16_append(sizeof(ev->buffer_length), &ev->buffer_length,start.cksum); 
 
-  for (i = 0; i < NP_NUM_CHAN; i++) 
+  for (ibd = 0; ibd <2 ; ibd++)
   {
-   start.cksum = stupid_fletcher16_append(ev->buffer_length, ev->data[i], start.cksum); 
+    start.cksum = stupid_fletcher16_append(sizeof(ev->board_id[ibd]), &ev->board_id[ibd], start.cksum); 
   }
 
-  start.cksum = stupid_fletcher16_append(sizeof(ev->board_id), &ev->board_id, start.cksum); 
+  for (ibd = 0; ibd <2 ; ibd++)
+  {
+    if (!ev->board_id[ibd]) continue; 
+    for (i = 0; i < NP_NUM_CHAN; i++) 
+    {
+     start.cksum = stupid_fletcher16_append(ev->buffer_length, ev->data[ibd][i], start.cksum); 
+    }
+  }
 
   written = generic_write(gf, sizeof(start), &start); 
   if (written != sizeof(start)) 
@@ -293,36 +329,32 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
   }
 
 
-  written = generic_write(gf, sizeof(ev->readout_number), &ev->readout_number); 
-  
-  if (written != sizeof(ev->readout_number))
-  {
-    return NP_ERR_NOT_ENOUGH_BYTES; 
-  }
-
-
-
   written = generic_write(gf, sizeof(ev->buffer_length), &ev->buffer_length); 
-  
   if (written != sizeof(ev->buffer_length))
   {
     return NP_ERR_NOT_ENOUGH_BYTES; 
   }
 
-  for (i = 0; i <NP_NUM_CHAN; i++)
-  {
-    written = generic_write(gf, ev->buffer_length, ev->data[i]); 
-    if (written != ev->buffer_length) 
-    {
-      return NP_ERR_NOT_ENOUGH_BYTES; 
-    }
-  }
 
   written = generic_write(gf, sizeof(ev->board_id), &ev->board_id); 
   if (written != sizeof(ev->board_id)) 
   {
       return NP_ERR_NOT_ENOUGH_BYTES; 
   }
+ 
+  for (ibd = 0; ibd < 2; ibd++)
+  {
+    if (!ev->board_id[ibd]) continue; 
+    for (i = 0; i <NP_NUM_CHAN; i++)
+    {
+      written = generic_write(gf, ev->buffer_length, ev->data[ibd][i]); 
+      if (written != ev->buffer_length) 
+      {
+        return NP_ERR_NOT_ENOUGH_BYTES; 
+      }
+    }
+  }
+
   return 0; 
 }
 
@@ -342,10 +374,10 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
   //add additional cases if necessary 
   if (start.ver == 0) 
   {
-      wanted = sizeof(ev->readout_number); 
-      got = generic_read(gf, wanted, &ev->readout_number); 
+      wanted = sizeof(ev->event_number); 
+      got = generic_read(gf, wanted, &ev->event_number); 
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-      cksum = stupid_fletcher16(wanted, &ev->readout_number); 
+      cksum = stupid_fletcher16(wanted, &ev->event_number); 
  
       wanted = sizeof(ev->buffer_length); 
       got = generic_read(gf, wanted, &ev->buffer_length); 
@@ -361,16 +393,15 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
         cksum = stupid_fletcher16_append(wanted, ev->data[i], cksum); 
 
         // zero out the rest of the memory 
-        memset(ev->data[i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
+        memset(ev->data[0][i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
       }
 
       wanted = sizeof(ev->board_id); 
       got = generic_read(gf, wanted, &ev->board_id); 
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-      cksum = stupid_fletcher16_append(wanted, &ev->board_id,cksum); 
-
-      // new stuff 
-      ev->event_number = ev->readout_number ; 
+      cksum = stupid_fletcher16_append(wanted, &ev->board_id[0],cksum); 
+      ev->board_id[1] = 0; 
+      memset(ev->data[1], 0, NP_NUM_CHAN * NP_MAX_WAVEFORM_LENGTH); 
   }
   else if (start.ver == NUPHASE_EVENT_VERSION) 
   {
@@ -379,36 +410,39 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
       cksum = stupid_fletcher16(wanted, &ev->event_number); 
 
-      wanted = sizeof(ev->readout_number); 
-      got = generic_read(gf, wanted, &ev->readout_number); 
-      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-      cksum = stupid_fletcher16_append(wanted, &ev->readout_number,cksum); 
- 
       wanted = sizeof(ev->buffer_length); 
       got = generic_read(gf, wanted, &ev->buffer_length); 
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
 
       cksum = stupid_fletcher16_append(wanted, &ev->buffer_length,cksum); 
 
-      for (i = 0; i < NP_NUM_CHAN; i++)
-      {
-        wanted = ev->buffer_length; 
-        got = generic_read(gf, wanted, ev->data[i]); 
-        if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-        cksum = stupid_fletcher16_append(wanted, ev->data[i], cksum); 
-
-        // zero out the rest of the memory 
-        memset(ev->data[i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
-      }
-
       wanted = sizeof(ev->board_id); 
       got = generic_read(gf, wanted, &ev->board_id); 
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
       cksum = stupid_fletcher16_append(wanted, &ev->board_id,cksum); 
+
+      int ibd; 
+      for (ibd = 0; ibd < 2; ibd++)
+      {
+        if (ev->board_id[ibd] == 0) continue; 
+
+        for (i = 0; i < NP_NUM_CHAN; i++)
+        {
+          wanted = ev->buffer_length; 
+          got = generic_read(gf, wanted, ev->data[i]); 
+          if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
+          cksum = stupid_fletcher16_append(wanted, ev->data[i], cksum); 
+
+          // zero out the rest of the memory 
+          memset(ev->data[i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
+        }
+      }
+
   }
   
   else
   {
+    fprintf(stderr,"Unimplemented version: %d\n", start.ver); 
     return NP_ERR_BAD_VERSION; 
   }
 
@@ -590,16 +624,32 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
   time_t t; 
   char timstr[128]; 
 
-  fprintf(f, "READOUT_NUMBER %"PRIu64"\n", hd->readout_number ); 
+  fprintf(f, "EVENT_NUMBER %"PRIu64"\n", hd->event_number ); 
   fprintf(f, "\t%s TRIGGER\n", trig_type_names[hd->trig_type]); 
-  fprintf(f,  "\ttrig num: %"PRIu64" board: %d\n", hd->trig_number, hd->board_id); 
+  fprintf(f,  "\ttrig num: %"PRIu64" boards: [%d,%d]\n", hd->trig_number, hd->board_id[0], hd->board_id[1]); 
   fprintf(f, "\tbuf len: %u ; pretrig: %u\n", hd->buffer_length, hd->pretrigger_samples); 
   fprintf(f,"\tbuf num: %u, buf_mask: %x\n", hd->buffer_number, hd->buffer_mask); 
-  t = hd->readout_time;
+  t = hd->readout_time[0];
   gmtime_r((time_t*) &t, &tim); 
   strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
-  fprintf(f, "\trdout time: %s.%09d UTC\n",timstr, hd->readout_time_ns); 
-  fprintf(f, "\ttrig time (raw): %"PRIu64"\n", hd->trig_time); 
+  fprintf(f, "\tbd %d rdout time: %s.%09d UTC\n",hd->board_id[0],timstr, hd->readout_time_ns[0]); 
+  if (hd->board_id[1])
+  {
+    t = hd->readout_time[1];
+    gmtime_r((time_t*) &t, &tim); 
+    strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+    fprintf(f, "\tbd %d rdout time: %s.%09d UTC\n",hd->board_id[1], timstr, hd->readout_time_ns[1]); 
+   
+  }
+
+  fprintf(f, "\tbd %d trig time (raw): %"PRIu64"\n", hd->board_id[0], hd->trig_time[0]); 
+
+  if (hd->board_id[1])
+  {
+
+    fprintf(f, "\tbd %d trig time (raw): %"PRIu64"\n", hd->board_id[1], hd->trig_time[1]); 
+  }
+
   t = hd->approx_trigger_time; 
   gmtime_r((time_t*) &t, &tim); 
   strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
@@ -611,8 +661,8 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
   {
     fprintf(f,"\t\tB%02d: %u\n", i, hd->beam_power[i]); 
   }
-  fprintf(f,"\tprev sec deadtime: %u\n", hd->deadtime); 
-  fprintf(f,"\tchannel_mask: %x\n", hd->channel_mask); 
+  fprintf(f,"\tprev sec deadtime: (%u, %u)\n", hd->deadtime[0], hd->deadtime[1]); 
+  fprintf(f,"\tchannel_mask: (%x, %x)\n", hd->channel_mask[0], hd->channel_mask[1]); 
   fprintf(f,"\tcalpulser: %s\n", hd->calpulser ? "yes" : "no"); 
   
 
@@ -622,13 +672,17 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
 
 int nuphase_event_print(FILE *f, const nuphase_event_t *ev, char sep)
 {
-  int ichan, isamp; 
-  fprintf(f, "READOUT NUMBER:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", sep,ev->readout_number,sep,sep,ev->board_id, sep,sep,ev->buffer_length ); 
-  for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
+  int ichan, isamp, ibd ; 
+  for (ibd = 0; ibd < 2; ibd++)
   {
-    for (isamp = 0; isamp < ev->buffer_length; isamp++) 
+    if (!ev->board_id[ibd]) continue;
+    fprintf(f, "EVENT NUMBER:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", sep,ev->event_number,sep,sep,ev->board_id[ibd], sep,sep,ev->buffer_length ); 
+    for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
-      fprintf(f, "%d%c", ev->data[ichan][isamp], isamp < ev->buffer_length - 1 ? sep : '\n'); 
+      for (isamp = 0; isamp < ev->buffer_length; isamp++) 
+      {
+        fprintf(f, "%d%c", ev->data[ibd][ichan][isamp], isamp < ev->buffer_length - 1 ? sep : '\n'); 
+      }
     }
   }
 

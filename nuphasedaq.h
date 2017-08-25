@@ -40,6 +40,12 @@ typedef enum nuphase_trigger_enable
 } nuphase_trigger_enable_t; 
 
 
+typedef enum nuphase_which_board
+{
+  MASTER = 0, 
+  SLAVE = 1
+} nuphase_which_board_t; 
+
 
 /** Configuration options, sent to fpga  with configure. 
  * Only values different from previously sent config will be sent
@@ -57,8 +63,8 @@ typedef struct nuphase_config
  nuphase_dev_t * master;                     
 } nuphase_config_t; 
 
-/** Fill the config with default options */
-void nuphase_config_init(nuphase_config_t * c); 
+/** Fill the config with default options.*/ 
+void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which ); 
 
 
 /** Firmware info retrieved from board */ 
@@ -97,10 +103,6 @@ typedef enum nuphase_reset_type
  * This opens a nuphase phased array board and returns a pointer to the opaque
  * device handle. 
  *
- * Currently, communication with the board is via userspace SPI (spidev) and
- * optionally, a userspace interrupt (using uio_pdrv_genirq, as in
- * https://yurovsky.github.io/2014/10/10/linux-uio-gpio-interrupt/) to know
- * when data is available without polling. 
  *
  * If that turns out to be too slow, I guess we can write a kernel driver. 
  *
@@ -120,28 +122,29 @@ typedef enum nuphase_reset_type
  * process can hold it. 
  *
  *
- * @param spi_device_name The SPI device (likely something like /sys/bus/spi/devices/spi1.0 )
- *
- * @param gpio_interrupt_device_name The GPIO device acting as an interrupt (e.g. /dev/uio0).
- *                                    This is purely optional, if not defined, we will busy wait. Also this has never been tested. 
- *
+ * @param spi_master_device_name The master SPI device (likely something like /dev/spidev2.0) 
+ * @param spi_slave_device_name The slave SPI device (likely something like /dev/spidev1.0) , or 0 for single board mode
+ * @param power_gpio_number If positive, the GPIO that controls the board (and should be enabled at start) 
  * @param cfg    If non-zero, this config is used instead of the default initial one.
+ * @param cfg_slave    If non-zero, this config is used for the slave instead of the default initial one.
  * @param sync_access  If non-zero a mutex will be initialized that will control concurrent access 
  *                     to this device from multiple threads. ALSO ENABLES MASTER/SLAVE MODE ( enables synchronization of sw triggers / buffer clears) . 
  *
  *
  * @returns a pointer to the file descriptor, or 0 if something went wrong. 
  */
-nuphase_dev_t * nuphase_open(const char * spi_device_name,
-                             const char * gpio_interrupt_device_name, 
+nuphase_dev_t * nuphase_open(const char * spi_master_device_name, 
+                             const char * spi_slave_device_name, 
+                             int power_gpio_number, 
                              const nuphase_config_t * cfg,
+                             const nuphase_config_t * cfg_slave,
                              int sync_access) ; 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
 
-/**Set the board id for the device */
-void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number) ;
+/**Set the board id for the device. Note that slave will be number +1. */
+void nuphase_set_board_id(nuphase_dev_t * d, uint8_t number, nuphase_which_board_t which_board) ;
 
 
 /** Set the readout number offset. Currently DOES NOT reset the counter
@@ -163,10 +166,10 @@ void nuphase_set_readout_number_offset(nuphase_dev_t * d, uint64_t offset);
  * @param type The type of reset to do. See the documentation for nuphase_reset_t 
  * @returns 0 on success
  */
-int nuphase_reset(nuphase_dev_t *d, const nuphase_config_t * c, nuphase_reset_t type); 
+int nuphase_reset(nuphase_dev_t *d, const nuphase_config_t * c_master, const nuphase_config_t * c_slave, nuphase_reset_t type); 
 
-/**Retrieve the board id for the current event */
-uint8_t nuphase_get_board_id(const nuphase_dev_t * d) ; 
+/**Retrieve the board id for the current event. */
+uint8_t nuphase_get_board_id(const nuphase_dev_t * d, nuphase_which_board_t which_board) ; 
 
 
 /** Set the length of the readout buffer. Can be anything between 0 and 2048. (default is 624). */ 
@@ -177,9 +180,8 @@ uint16_t nuphase_get_buffer_length(const nuphase_dev_t *d);
 
 
 /** Send a software trigger to the device
- * @param d the device to send a trigger to, if 0, will send to both master and slave if they both exist and have locking enabled. 
+ * @param d the device to send a trigger to. 
  *
- * WARNING: if you are reading two boards in a master / slave configuration and send a sw trigger to just one device, they will probably go out of sync causing problems. 
  **/ 
 int nuphase_sw_trigger(nuphase_dev_t * d); 
 
@@ -188,8 +190,7 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
 
 /** Waits for data to be available, or time out, or nuphase_cancel_wait. 
  * 
- * If a hardware interrupt is available, we will wait for that. Otherwise we
- * will keep polling nuphase_check_buffers. 
+ * Will busy poll nuphase_check_buffers (which) 
  *
  * If ready is passed, it will be filled after done waiting. Normally it should
  * be non-zero unless interrupted or the timeout is reached. 
@@ -199,8 +200,7 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
  * The "correct way" to interrupt this by using nuphase_cancel_wait (either
  * from a signal handler or another thread). 
  *
- * If interrupted, (normally by nuphase_cancel_wait, although when using the
- * GPIO interrupt, could also be interrupted by a signal), will return EINTR and ready (if passed) will be set to 0. 
+ * If interrupted, (normally by nuphase_cancel_wait,), will return EINTR and ready (if passed) will be set to 0. 
  *
  * We also immediately return EAGAIN if there is a previous call to nuphase_cancel_wait that didn't actually cancel anything (like
  * if it was called when nothing was waiting). 
@@ -211,28 +211,28 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
  * Returns 0 on success,  
  * 
  **/
-int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds); 
+int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds, nuphase_which_board_t which); 
 
 /** Checks to see which buffers are ready to be read
  * If next_buffer is non-zero, will fill it with what the board things the next buffer to read is. 
  * */ 
-nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buffer  );
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buffer, nuphase_which_board_t which);
 
 /** Retrieve the firmware info */
-int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo); 
+int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo, nuphase_which_board_t which); 
 
 /** Sends config to the board. The config is stuff like pretrigger threshold, 
  * Note that it's possible this may not take effect on the immediate next buffer. 
  *
  * @param force reconfigure even if matches current value by board (mostly useful internally) 
  * */ 
-int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config, int force); 
+int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config, int force, nuphase_which_board_t which); 
 
 
 
-/** Fills in the status struct 
+/** Fills in the status struct. 
  **/ 
-int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat); 
+int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat, nuphase_which_board_t which); 
 
 /**
  * Highest level read function. This will wait for data, read it into the 
@@ -262,8 +262,10 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat);
  *
  **/ 
 int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d, 
-                                              nuphase_header_t (*headers)[NP_NUM_BUFFER], 
-                                              nuphase_event_t  (*events)[NP_NUM_BUFFER]) ; 
+                                              nuphase_header_t (*headers_master)[NP_NUM_BUFFER], 
+                                              nuphase_event_t  (*events_master)[NP_NUM_BUFFER]
+                                              
+                                              ) ; 
 
 
 /** Read a single event, filling header and event, and also clearing the buffer and increment event number. Does not check if there is anyting available in the buffer.  
@@ -275,7 +277,8 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
  * Returns 0 on success.
  * */ 
 int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer, 
-                        nuphase_header_t * header, nuphase_event_t * event);
+                        nuphase_header_t * header, nuphase_event_t * event
+                        );
 
 
 /** Reads buffers specified by mask. An event and header  must exist for each
@@ -284,7 +287,8 @@ int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer,
  *
  **/
 int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, 
-                                nuphase_header_t *header_arr,  nuphase_event_t * event_arr); 
+                                nuphase_header_t *header_arr,  nuphase_event_t * event_arr
+                                ); 
  
 /** Reads buffers specified by mask. An pointer to event and header  must exist for each
  * buffer in the array pointed to by header_arr and event_arr ( Clears each
@@ -292,7 +296,8 @@ int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask,
  * on success. 
  **/
 int nuphase_read_multiple_ptr(nuphase_dev_t *d, nuphase_buffer_mask_t mask, 
-                              nuphase_header_t **header_ptr_arr,  nuphase_event_t ** event_ptr_arr); 
+                              nuphase_header_t **header_ptr_arr,  nuphase_event_t ** event_ptr_arr
+                              ); 
 
 
 
@@ -301,14 +306,14 @@ int nuphase_read_multiple_ptr(nuphase_dev_t *d, nuphase_buffer_mask_t mask,
  * Does not clear the buffer or increment event number. 
  *
  **/ 
-int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start_ram, uint8_t end_ram, uint8_t * data); 
+int nuphase_read_raw(nuphase_dev_t *d, uint8_t buffer, uint8_t channel, uint8_t start_ram, uint8_t end_ram, uint8_t * data, nuphase_which_board_t which); 
 
 
-/** Lowest-level write command. Writes 4 bytes from buffer */ 
+/** Lowest-level write command. Writes 4 bytes from buffer to device (if master/slave, to both) */ 
 int nuphase_write(nuphase_dev_t *d, const uint8_t* buffer); 
 
 /** Lowest-level read command. Reads 4 bytes into buffer */ 
-int nuphase_read(nuphase_dev_t *d, uint8_t* buffer); 
+int nuphase_read(nuphase_dev_t *d, uint8_t* buffer, nuphase_which_board_t which); 
 
 /** Clear the specified buffers. Returns 0 on success. */ 
 int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask); 
@@ -325,11 +330,12 @@ void nuphase_cancel_wait(nuphase_dev_t *d) ;
  * @param d device handle
  * @param address The register address to read
  * @param result  where to store the result, should be 4 bytes. 
+ * @param slave   if 1, read from slave instead of master (or single board) 
  * @return 0 on success
  * 
  * 
  **/ 
-int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result); 
+int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result, nuphase_which_board_t which); 
 
 
 //TODO: 

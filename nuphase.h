@@ -76,24 +76,23 @@ typedef enum nuphase_trigger_type
 typedef struct nuphase_header 
 {
   uint64_t event_number;                         //!< A unique identifier for this event. If only one board, will match readout number. Otherwise, might skip if the boards are out of sync. 
-  uint64_t readout_number;                       //!< the number assigned to this event at readout (with an offset). Will match the event body. 
   uint64_t trig_number;                          //!< the sequential (since reset) trigger number assigned to this event. 
   uint16_t buffer_length;                        //!< the buffer length. Stored both here and in the event. 
   uint16_t pretrigger_samples;                   //!< Number of samples that are pretrigger
-  uint32_t readout_time;                         //!< CPU time of readout, seconds
-  uint32_t readout_time_ns;                      //!< CPU time of readout, nanoseconds 
-  uint64_t trig_time;                            //!< Board trigger time (raw units) 
+  uint32_t readout_time[2];                         //!< CPU time of readout, seconds
+  uint32_t readout_time_ns[2];                      //!< CPU time of readout, nanoseconds 
+  uint64_t trig_time[2];                            //!< Board trigger time (raw units) 
   uint32_t approx_trigger_time;                  //!< Board trigger time converted to real units (approx secs) 
   uint32_t approx_trigger_time_nsecs;            //!< Board trigger time converted to real units (approx nnsecs) 
   uint16_t triggered_beams;                         //!< The beams that triggered 
   uint16_t beam_mask;                            //!< The enabled beams
   uint32_t beam_power[NP_NUM_BEAMS];             //!< The power in each beam at the trigger time
-  uint32_t deadtime;                             //!< ??? Will we have this available? If so, this will be a fraction
+  uint32_t deadtime[2];                             //!< ??? Will we have this available? If so, this will be a fraction. (store for slave board as well) 
   uint8_t buffer_number;                         //!< the buffer number (do we need this?) 
-  uint8_t channel_mask;                          //!< The enabled channels  
+  uint8_t channel_mask[2];                          //!< The enabled channels  
   uint8_t channel_overflow;                      //!< Bitmask of channels that overflowed the 5 bits 
   uint8_t buffer_mask;                           //!< The buffer mask at time of read out (do we want this?)   
-  uint8_t board_id;                              //!< The board number assigned at startup. 
+  uint8_t board_id[2];                              //!< The board number assigned at startup. If board_id[1] == 0, no slave. 
   nuphase_trig_type_t trig_type;                 //!< The trigger type? 
   uint8_t calpulser;                             //!< Was the calpulser on? 
 } nuphase_header_t; 
@@ -106,10 +105,9 @@ typedef struct nuphase_header
 typedef struct nuphase_event
 {
   uint64_t event_number;  //!< The event number. Should match event header.  
-  uint64_t readout_number;  //!< The readout number. Should match event header.  
   uint16_t buffer_length; //!< The buffer length that is actually filled. Also available in event header. 
-  uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. 
-  uint8_t board_id;     //!< The board number assigned at startup. 
+  uint8_t board_id[2];     //!< The board number assigned at startup. If the second board_id is zero, that indicates there is no slave device. 
+  uint8_t  data[2][NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. The second array is only filled if there is a slave-device. 
 } nuphase_event_t; 
 
 
