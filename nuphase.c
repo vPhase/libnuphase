@@ -342,7 +342,7 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
       return NP_ERR_NOT_ENOUGH_BYTES; 
   }
  
-  for (ibd = 0; ibd < 2; ibd++)
+  for (ibd = 0; ibd < NP_MAX_BOARDS; ibd++)
   {
     if (!ev->board_id[ibd]) continue; 
     for (i = 0; i <NP_NUM_CHAN; i++)
@@ -422,19 +422,19 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
       cksum = stupid_fletcher16_append(wanted, &ev->board_id,cksum); 
 
       int ibd; 
-      for (ibd = 0; ibd < 2; ibd++)
+      for (ibd = 0; ibd <NP_MAX_BOARDS; ibd++)
       {
         if (ev->board_id[ibd] == 0) continue; 
 
         for (i = 0; i < NP_NUM_CHAN; i++)
         {
           wanted = ev->buffer_length; 
-          got = generic_read(gf, wanted, ev->data[i]); 
+          got = generic_read(gf, wanted, ev->data[ibd][i]); 
           if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-          cksum = stupid_fletcher16_append(wanted, ev->data[i], cksum); 
+          cksum = stupid_fletcher16_append(wanted, ev->data[ibd][i], cksum); 
 
           // zero out the rest of the memory 
-          memset(ev->data[i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
+          memset(ev->data[ibd][i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
         }
       }
 
@@ -673,7 +673,7 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
 int nuphase_event_print(FILE *f, const nuphase_event_t *ev, char sep)
 {
   int ichan, isamp, ibd ; 
-  for (ibd = 0; ibd < 2; ibd++)
+  for (ibd = 0; ibd < NP_MAX_BOARDS; ibd++)
   {
     if (!ev->board_id[ibd]) continue;
     fprintf(f, "EVENT NUMBER:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", sep,ev->event_number,sep,sep,ev->board_id[ibd], sep,sep,ev->buffer_length ); 

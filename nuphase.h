@@ -38,6 +38,9 @@ extern "C" {
 /** The maximum length of a waveform */ 
 #define NP_MAX_WAVEFORM_LENGTH 2048  
 
+//master + slave 
+#define NP_MAX_BOARDS 2  
+
 /** The number of trigger beams available */ 
 #define NP_NUM_BEAMS 15 
 
