@@ -1621,7 +1621,8 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
       uint16_t min_max_i = NP_MAX_WAVEFORM_LENGTH; 
       uint16_t max_max_i = 0; 
       uint8_t min_max_v = 255; 
-      uint16_t max_i[2][NP_NUM_CHAN] = {0}; 
+      uint16_t max_i[2][NP_NUM_CHAN];
+      memset(max_i,0,sizeof(max_i)); 
 
       //loop through and find where the maxes are
       int ichan, isamp; 
