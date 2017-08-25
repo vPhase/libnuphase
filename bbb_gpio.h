@@ -17,8 +17,8 @@ typedef struct bbb_gpio_pin bbb_gpio_pin_t;
 /** enum pin direction */ 
 typedef enum bbb_gpio_direction
 {
-  BBB_IN, //! input 
-  BBB_OUT,  //! output
+  BBB_IN, 
+  BBB_OUT
 } bbb_gpio_direction_t; 
 
 
