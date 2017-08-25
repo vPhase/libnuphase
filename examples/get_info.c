@@ -19,7 +19,7 @@ int main(int nargs, char ** args)
   }
 
   //no interrupt, no locking, default config, 
-  dev = nuphase_open(args[1],0,0,0,0,0); 
+  dev = nuphase_open(args[1],0,60,0,0,0); 
   status = nuphase_fwinfo(dev, &fw,MASTER); 
   nuphase_close(dev); 
 

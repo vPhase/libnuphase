@@ -36,7 +36,7 @@ int main(int nargs, char ** args )
   }
 
 
-  dev =  nuphase_open(args[1],0,0,0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],0,60,0,0,0); //no interrupt for now and no threadlocking
   nuphase_sw_trigger(dev); 
 
   clock_gettime(CLOCK_MONOTONIC,&t0); 
