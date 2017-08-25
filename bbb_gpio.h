@@ -1,21 +1,24 @@
 #ifndef bbb_gpio_h 
 #define bbb_gpio_h 
 
-/**GPIO helper library for BeagleBoneBlack 
+/** 
+ * \file bbb_gpio.h
+ *
+ * GPIO helper code for BeagleBoneBlack. This just messes with the sysfs filesystem. 
  *
  * Cosmin Deaconu
  * cozzyd@kicp.uchicago.edu
  */ 
  
 
-/* Opaque device handle */
+/** Opaque device handle */
 typedef struct bbb_gpio_pin bbb_gpio_pin_t; 
 
-/** pin direction */ 
+/** enum pin direction */ 
 typedef enum bbb_gpio_direction
 {
-  BBB_IN, 
-  BBB_OUT, 
+  BBB_IN, //! input 
+  BBB_OUT,  //! output
 } bbb_gpio_direction_t; 
 
 
@@ -40,6 +43,7 @@ int bbb_gpio_get(bbb_gpio_pin_t * pin);
 /** Close the gpio pin. Return 0 on success */ 
 int bbb_gpio_close(bbb_gpio_pin_t * pin); 
 
+/** returns the GPIO pin number associated with this pin */ 
 int bbb_gpio_pin_number(const bbb_gpio_pin_t * pin); 
 
 /** Gets the direction. Could be wrong if it's been changed from underneath us
