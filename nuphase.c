@@ -300,13 +300,9 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
 
   start.cksum = stupid_fletcher16(sizeof(ev->event_number), &ev->event_number); 
   start.cksum = stupid_fletcher16_append(sizeof(ev->buffer_length), &ev->buffer_length,start.cksum); 
+  start.cksum = stupid_fletcher16_append(sizeof(ev->board_id), &ev->board_id, start.cksum); 
 
-  for (ibd = 0; ibd <2 ; ibd++)
-  {
-    start.cksum = stupid_fletcher16_append(sizeof(ev->board_id[ibd]), &ev->board_id[ibd], start.cksum); 
-  }
-
-  for (ibd = 0; ibd <2 ; ibd++)
+  for (ibd = 0; ibd <NP_MAX_BOARDS ; ibd++)
   {
     if (!ev->board_id[ibd]) continue; 
     for (i = 0; i < NP_NUM_CHAN; i++) 
@@ -314,6 +310,7 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
      start.cksum = stupid_fletcher16_append(ev->buffer_length, ev->data[ibd][i], start.cksum); 
     }
   }
+
 
   written = generic_write(gf, sizeof(start), &start); 
   if (written != sizeof(start)) 
@@ -335,8 +332,8 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
     return NP_ERR_NOT_ENOUGH_BYTES; 
   }
 
-
   written = generic_write(gf, sizeof(ev->board_id), &ev->board_id); 
+
   if (written != sizeof(ev->board_id)) 
   {
       return NP_ERR_NOT_ENOUGH_BYTES; 
@@ -371,39 +368,9 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
   if (got) return got; 
 
 
-  //add additional cases if necessary 
-  if (start.ver == 0) 
-  {
-      wanted = sizeof(ev->event_number); 
-      got = generic_read(gf, wanted, &ev->event_number); 
-      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-      cksum = stupid_fletcher16(wanted, &ev->event_number); 
- 
-      wanted = sizeof(ev->buffer_length); 
-      got = generic_read(gf, wanted, &ev->buffer_length); 
-      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-
-      cksum = stupid_fletcher16_append(wanted, &ev->buffer_length,cksum); 
-
-      for (i = 0; i < NP_NUM_CHAN; i++)
-      {
-        wanted = ev->buffer_length; 
-        got = generic_read(gf, wanted, ev->data[i]); 
-        if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-        cksum = stupid_fletcher16_append(wanted, ev->data[i], cksum); 
-
-        // zero out the rest of the memory 
-        memset(ev->data[0][i] + wanted, 0, NP_MAX_WAVEFORM_LENGTH - wanted); 
-      }
-
-      wanted = sizeof(ev->board_id); 
-      got = generic_read(gf, wanted, &ev->board_id); 
-      if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-      cksum = stupid_fletcher16_append(wanted, &ev->board_id[0],cksum); 
-      ev->board_id[1] = 0; 
-      memset(ev->data[1], 0, NP_NUM_CHAN * NP_MAX_WAVEFORM_LENGTH); 
-  }
-  else if (start.ver == NUPHASE_EVENT_VERSION) 
+  //add additional cases if necessary for compatibility
+  //
+  if (start.ver == NUPHASE_EVENT_VERSION) 
   {
       wanted = sizeof(ev->event_number); 
       got = generic_read(gf, wanted, &ev->event_number); 
@@ -413,7 +380,6 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
       wanted = sizeof(ev->buffer_length); 
       got = generic_read(gf, wanted, &ev->buffer_length); 
       if (wanted != got) return NP_ERR_NOT_ENOUGH_BYTES; 
-
       cksum = stupid_fletcher16_append(wanted, &ev->buffer_length,cksum); 
 
       wanted = sizeof(ev->board_id); 
@@ -424,7 +390,11 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
       int ibd; 
       for (ibd = 0; ibd <NP_MAX_BOARDS; ibd++)
       {
-        if (ev->board_id[ibd] == 0) continue; 
+        if (!ev->board_id[ibd]) 
+        {
+          memset(ev->data[ibd], sizeof(ev->data[ibd]), 0); 
+          continue; 
+        }
 
         for (i = 0; i < NP_NUM_CHAN; i++)
         {
