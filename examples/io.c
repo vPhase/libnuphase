@@ -17,13 +17,13 @@ int main(int nargs, const char ** args)
 
   //fill a nonsense header 
 
-  hd.readout_number = 12345; 
+  hd.event_number = 12345; 
   hd.trig_number = 23456; 
   hd.buffer_length = 600; 
   hd.pretrigger_samples = 64; 
-  hd.readout_time =  1500439356; 
-  hd.readout_time_ns =  10005; 
-  hd.trig_time =  31415; 
+  hd.readout_time[0] =  1500439356; 
+  hd.readout_time_ns[0] =  10005; 
+  hd.trig_time[0] =  31415; 
   hd.approx_trigger_time =  1500439355; 
   hd.approx_trigger_time_nsecs =  987654321; 
   hd.triggered_beams = 4; 
@@ -35,12 +35,12 @@ int main(int nargs, const char ** args)
     hd.beam_power[i] = i*i; 
   }
 
-  hd.deadtime = 0; 
+  hd.deadtime[0] = 0; 
   hd.buffer_number = 0; 
-  hd.channel_mask = 0xf; 
+  hd.channel_mask[0] = 0xf; 
   hd.channel_overflow = 0; 
   hd.buffer_mask =3; 
-  hd.board_id = 1; 
+  hd.board_id[0] = 1; 
   hd.trig_type = 2; 
   hd.calpulser = 0; 
 
@@ -49,16 +49,16 @@ int main(int nargs, const char ** args)
 
 
   //fill a nonsene event
-  ev.readout_number = hd.readout_number; 
+  ev.event_number = hd.event_number; 
   ev.buffer_length = hd.buffer_length; 
-  ev.board_id = hd.board_id; 
+  ev.board_id[0] = hd.board_id[0]; 
   for (i = 0; i < NP_NUM_CHAN; i++)
   {
     int j; 
     for (j = 0; j < hd.buffer_length; j++)
     {
       //some nonsense; 
-      ev.data[i][j] = 64 + i * sin( i*j) - i * cos(10*i-100) + i * i * cos(i*j-j*j); 
+      ev.data[0][i][j] = 64 + i * sin( i*j) - i * cos(10*i-100) + i * i * cos(i*j-j*j); 
     }
   }
 

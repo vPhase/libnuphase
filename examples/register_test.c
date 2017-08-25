@@ -21,7 +21,7 @@ int main(int nargs, char ** args )
     n = atoi(args[2]); 
 
 
-  nuphase_dev_t * dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
+  nuphase_dev_t * dev =  nuphase_open(args[1],0,0,0,0,0); //no interrupt for now and no threadlocking
 
   int i ;
   for (i = 0; i < n; i++) 
@@ -32,7 +32,7 @@ int main(int nargs, char ** args )
     for (j = 0; j <= 18; j++) 
     {
         uint8_t result[4]; 
-        nuphase_read_register(dev,j,result); 
+        nuphase_read_register(dev,j,result,MASTER); 
         printf("READ REGISTER %d, GOT: 0x%x 0x%x 0x%x 0x%x\n",j, result[0], result[1], result[2], result[3]); 
     }
     nuphase_clear_buffer(dev,0xf); 

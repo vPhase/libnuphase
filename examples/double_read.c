@@ -48,7 +48,7 @@ int main(int nargs, char ** args )
   buf1 = malloc(size); 
 
   signal(SIGINT, catch_interrupt); 
-  dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],0,0,0,0,0); //no interrupt for now and no threadlocking
 
 
   int i = 0; 
@@ -56,7 +56,7 @@ int main(int nargs, char ** args )
   {
     nuphase_sw_trigger(dev); 
     nuphase_buffer_mask_t mask; 
-    nuphase_wait(dev,&mask, 1.0); 
+    nuphase_wait(dev,&mask, 1.0,MASTER); 
 
     if (!mask) 
     {
@@ -64,8 +64,8 @@ int main(int nargs, char ** args )
       return 1; 
     }
     buffer = __builtin_ctz(mask); 
-    nuphase_read_raw(dev, buffer, ichan, start_addr, end_addr, buf0); 
-    nuphase_read_raw(dev, buffer, ichan, start_addr, end_addr, buf1); 
+    nuphase_read_raw(dev, buffer, ichan, start_addr, end_addr, buf0,MASTER); 
+    nuphase_read_raw(dev, buffer, ichan, start_addr, end_addr, buf1,MASTER); 
     nuphase_clear_buffer(dev,1 << buffer); 
 
     if (memcmp(buf0,buf1,size))

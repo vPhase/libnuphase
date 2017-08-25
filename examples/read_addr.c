@@ -36,13 +36,13 @@ int main(int nargs, char ** args )
   }
 
 
-  dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],0,0,0,0,0); //no interrupt for now and no threadlocking
   nuphase_sw_trigger(dev); 
 
   clock_gettime(CLOCK_MONOTONIC,&t0); 
   for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
   {
-    nuphase_read_raw(dev, buffer, ichan, start_addr, end_addr, buf[ichan]); 
+    nuphase_read_raw(dev, buffer, ichan, start_addr, end_addr, buf[ichan],MASTER); 
   }
 
   nuphase_clear_buffer(dev,1 << buffer); 

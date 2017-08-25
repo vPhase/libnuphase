@@ -18,20 +18,20 @@ int main(int nargs, char ** args )
   int sw_trigger = 1; 
   if (nargs < 2) 
   {
-    printf("Usage: read_event spidev [software trigger = 1] [hdfile=head.dat]  evfile = [ev.dat]\n"); 
+    printf("Usage: read_event spidev_master, spidev_slave, [software trigger = 1] [hdfile=head.dat]  evfile = [ev.dat]\n"); 
     return 1; 
   }
 
-  if (nargs > 2) 
+  if (nargs > 3) 
   {
-    sw_trigger = atoi(args[2]); 
+    sw_trigger = atoi(args[3]); 
   }
 
-  FILE * fhd = fopen(nargs > 3 ? args[3]: "head.dat" ,"w"); 
-  FILE * fev = fopen(nargs > 4 ? args[4]: "ev.dat" ,"w"); 
+  FILE * fhd = fopen(nargs > 4 ? args[4]: "head.dat" ,"w"); 
+  FILE * fev = fopen(nargs > 5 ? args[5]: "ev.dat" ,"w"); 
 
 
-  dev =  nuphase_open(args[1],0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],args[2],0,0,0,0); //no interrupt for now and no threadlocking
 
   nuphase_set_readout_number_offset(dev,0); 
   nuphase_set_buffer_length(dev,127*16); 
@@ -46,7 +46,7 @@ int main(int nargs, char ** args )
   struct timespec t1; 
 
   nuphase_buffer_mask_t mask; 
-  nuphase_wait(dev,&mask,1); 
+  nuphase_wait(dev,&mask,1,MASTER); 
   if (!mask)
   {
     fprintf(stderr,"timed out.. . :(\n"); 

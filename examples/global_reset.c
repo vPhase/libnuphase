@@ -17,10 +17,10 @@ int main(int nargs, char ** args)
   }
 
   //no interrupt, no locking, default config, 
-  dev = nuphase_open(args[1],0,0,0); 
+  dev = nuphase_open(args[1],0,0,0,0,0); 
   nuphase_config_t cfg; 
-  nuphase_config_init(&cfg); 
-  nuphase_reset(dev,&cfg,NP_RESET_GLOBAL); 
+  nuphase_config_init(&cfg,MASTER); 
+  nuphase_reset(dev,&cfg,0,NP_RESET_GLOBAL); 
   nuphase_close(dev); 
 
 
