@@ -17,6 +17,7 @@
 #include <inttypes.h>
 #include <errno.h> 
 #include <endian.h>
+#include "bbb_gpio.h" 
 
 #define NP_ADDRESS_MAX 128 
 #define NP_SPI_BYTES  NP_WORD_SIZE
@@ -149,6 +150,8 @@ struct nuphase_dev
   // device state 
   int current_buf[2]; 
   int current_mode[2]; 
+
+  bbb_gpio_pin_t * gpio_pin; 
   
 }; 
 
@@ -608,9 +611,6 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
     return 0; 
   }
 
-  //make sure sync is off 
-  do_write(fd[0], buf_sync_off); 
-
 
 
 
@@ -640,8 +640,26 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
     fd[1] = 0; 
   }
 
-  dev = malloc(sizeof(nuphase_dev_t)); 
 
+  bbb_gpio_pin_t * gpio_pin = 0;
+
+  if (gpio_number) 
+  {
+    gpio_pin = bbb_gpio_open(gpio_number, BBB_OUT); 
+    if (gpio_pin) 
+    {
+      //set value low 
+      bbb_gpio_set(gpio_pin, 0); 
+    }
+  }
+
+  //make sure sync is off 
+  do_write(fd[0], buf_sync_off); 
+
+
+
+  dev = malloc(sizeof(nuphase_dev_t)); 
+  dev->gpio_pin = gpio_pin; 
   dev->device_name[0] = devicename_master; 
   dev->device_name[1] = devicename_slave; 
   memcpy(dev->fd,fd,sizeof(fd));
@@ -818,6 +836,12 @@ int nuphase_close(nuphase_dev_t * d)
 
     d->enable_locking = 0; 
   }
+
+  if (d->gpio_pin)
+  {
+   ret += 256*bbb_gpio_close(d->gpio_pin); 
+  }
+
 
   if (d->fd[1])
   {
