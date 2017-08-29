@@ -36,7 +36,9 @@ typedef enum nuphase_trigger_enable
 {
   NP_TRIGGER_BEAMFORMING = 1, 
   NP_TRIGGER_EXTIN       = 2, 
-  NP_TRIGGER_EXTOUT      = 4 
+  NP_TRIGGER_BEAM8       = 4, 
+  NP_TRIGGER_BEAM4a       = 8, 
+  NP_TRIGGER_BEAM4b       = 16, 
 } nuphase_trigger_enable_t; 
 
 
@@ -57,7 +59,8 @@ typedef struct nuphase_config
  uint16_t trigger_mask;                     //!< Which triggers to use, default is all (0xffffff) 
  uint8_t  attenuation[NP_NUM_CHAN];         //!< per-channel attenuation
  uint8_t  channel_mask;                     //!< Which channels to use, default is all (0xff)
- nuphase_trigger_enable_t trigger;                  //!< Which trigger enables to use 
+ nuphase_trigger_enable_t trigger_enables;           //!< Which trigger enables to use 
+ uint8_t phased_trigger_readout;            //!< 1 to actually store events
  uint8_t trigger_holdoff;                   //!< Trigger holdoff
  uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 128 samples)  (3 bits);  
  nuphase_dev_t * master;                     

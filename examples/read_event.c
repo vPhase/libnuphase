@@ -31,12 +31,12 @@ int main(int nargs, char ** args )
   FILE * fev = fopen(nargs > 5 ? args[5]: "ev.dat" ,"w"); 
 
 
-  dev =  nuphase_open(args[1],args[2],60,0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],args[2],0,0,0,0); //no interrupt for now and no threadlocking
 
   nuphase_set_readout_number_offset(dev,0); 
   nuphase_set_buffer_length(dev,127*16); 
 
-  nuphase_calpulse(dev,1); 
+  nuphase_calpulse(dev,0); 
   if (sw_trigger) 
   {
       nuphase_sw_trigger(dev); 

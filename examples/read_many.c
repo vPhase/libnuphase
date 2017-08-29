@@ -35,21 +35,24 @@ int main(int nargs, char ** args )
     return 1; 
   }
 
-  if (nargs > 2) 
+  if (nargs > 3) 
   {
-    sw_trigger = atoi(args[3]) & 1 ; 
-    calpulse = atoi(args[3]) & 2 ; 
+    sw_trigger = atoi(args[3]) ; 
+  }
+  if (nargs > 4) 
+  {
+    calpulse = atoi(args[4]) ; 
   }
 
-  FILE * fhd = fopen(nargs > 4 ? args[4]: "headers.dat" ,"w"); 
-  FILE * fev = fopen(nargs > 5 ? args[5]: "events.dat" ,"w"); 
+  FILE * fhd = fopen(nargs > 5 ? args[5]: "headers.dat" ,"w"); 
+  FILE * fev = fopen(nargs > 6 ? args[6]: "events.dat" ,"w"); 
 
 
   signal(SIGINT, catch_interrupt); 
-  dev =  nuphase_open(args[1],args[2],60,0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],args[2],0,0,0,0); //no interrupt for now and no threadlocking
 
   nuphase_set_readout_number_offset(dev,0); 
-  nuphase_set_buffer_length(dev,127*16); 
+//  nuphase_set_buffer_length(dev,127*16); 
   nuphase_calpulse(dev,calpulse); 
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
@@ -89,6 +92,9 @@ int main(int nargs, char ** args )
       nuphase_header_write(fhd,&hd[i]); 
 
     }
+//    nuphase_status_t status; 
+//    nuphase_read_status(dev,&status, MASTER); 
+//    nuphase_status_print(stdout,&status); 
 
   }
   nuphase_calpulse(dev,0); 

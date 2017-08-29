@@ -632,7 +632,8 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
     fprintf(f,"\t\tB%02d: %u\n", i, hd->beam_power[i]); 
   }
   fprintf(f,"\tprev sec deadtime: (%u, %u)\n", hd->deadtime[0], hd->deadtime[1]); 
-  fprintf(f,"\tchannel_mask: (%x, %x)\n", hd->channel_mask[0], hd->channel_mask[1]); 
+  fprintf(f,"\ttrig_channel_mask: %x\n", hd->channel_mask); 
+  fprintf(f,"\tchannel_read_mask: (%x,%x)\n", hd->channel_read_mask[0],hd->channel_read_mask[1]); 
   fprintf(f,"\tcalpulser: %s\n", hd->calpulser ? "yes" : "no"); 
   
 

@@ -36,10 +36,10 @@
 #define SPI_CAST  (uintptr_t) 
 
 #define NP_DELAY_USECS 0
-#define NP_CS_CHANGE 1
+#define NP_CS_CHANGE 0
 
 #define POLL_USLEEP 500
-#define SPI_CLOCK 10000000
+#define SPI_CLOCK 20000000
 //#define SPI_CLOCK 1000000
 
 #define MAX_XFERS 511
@@ -90,6 +90,7 @@ typedef enum
   REG_TRIGGER_MASK       = 0x50, 
   REG_TRIG_HOLDOFF       = 0x51, 
   REG_TRIG_ENABLE        = 0x52, 
+  REG_PHASED_TRIGGER     = 0x54, 
   REG_THRESHOLDS         = 0x56, // add the threshold to this to get the right register
   REG_SET_READ_REG       = 0x6d, 
   REG_RESET_COUNTER      = 0x7e, 
@@ -131,8 +132,8 @@ struct nuphase_dev
   volatile int cancel_wait; // needed for signal handlers 
   struct timespec start_time; //the time of the last clock reset
 
-  uint8_t next_read_buffer[2]; //what buffer to read next 
-  uint8_t hardware_next[2]; // what buffer the hardware things we should read next 
+  uint8_t next_read_buffer; //what buffer to read next 
+  uint8_t hardware_next; // what buffer the hardware things we should read next 
 
   int spi_clock; 
   int cs_change; 
@@ -173,7 +174,7 @@ static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer)
 #ifdef DEBUG_PRINTOUTS
   clock_gettime(CLOCK_REALTIME, &end) ; 
   int i; 
-  printf("START BULK TRANSFER (t = %lu.%lu)\n", start.tv_sec, start.tv_nsec); 
+  printf("START BULK TRANSFER (fd=%d, t = %lu.%lu)\n", fd,start.tv_sec, start.tv_nsec); 
   for (i = 0; i < n; i++)
   {
       printf("\tXFR %03d\t",i); 
@@ -189,7 +190,7 @@ static int do_xfer(int fd, int n, struct spi_ioc_transfer * xfer)
       }
       printf("\n"); 
   }
-  printf("END BULK TRANSFER (t= %lu.%lu)\n", end.tv_sec, end.tv_nsec); 
+  printf("END BULK TRANSFER (fd=%d,t= %lu.%lu)\n", fd,end.tv_sec, end.tv_nsec); 
 #endif 
   return ret; 
 }
@@ -198,7 +199,7 @@ static int do_write(int fd, const uint8_t * p)
 {
   int ret = write(fd,p, NP_SPI_BYTES); 
 #ifdef DEBUG_PRINTOUTS
-  printf("WRITE: [0x%02x 0x%02x 0x%02x 0x%02x]\n", p[0],p[1],p[2],p[3]); 
+  printf("WRITE(%d): [0x%02x 0x%02x 0x%02x 0x%02x]\n",fd, p[0],p[1],p[2],p[3]); 
 #endif
   return ret; 
 }
@@ -207,7 +208,7 @@ static int do_read(int fd, uint8_t * p)
 {
   int ret = read(fd,p, NP_SPI_BYTES); 
 #ifdef DEBUG_PRINTOUTS
-  printf("READ: [0x%02x 0x%02x 0x%02x 0x%02x]\n", p[0],p[1],p[2],p[3]); 
+  printf("READ(%d): [0x%02x 0x%02x 0x%02x 0x%02x]\n",fd, p[0],p[1],p[2],p[3]); 
 #endif
   return ret; 
 }
@@ -290,8 +291,9 @@ void fillBuffers()
   memset(buf_clear,0,sizeof(buf_clear)); 
   for (i = 0; i < (1 << NP_NUM_BUFFER); i++)
   {
-    buf_clear[i][0]=REG_CLEAR; 
-    buf_clear[i][3]= i == 0xf ? 0xf | 0x80 : i;   //set buffer to zero when clearing all buffers 
+    buf_clear[i][0] = REG_CLEAR; 
+    buf_clear[i][2] = i == 0xf ? 1 : 0;  //set buffer to zero when clearing all buffers 
+    buf_clear[i][3] = i;  
   }
 
   memset(buf_pick_scaler,0,sizeof(buf_pick_scaler)); 
@@ -382,11 +384,15 @@ static int synchronized_command(nuphase_dev_t *d, const uint8_t * cmd, uint8_t r
   USING(d); 
 
   int ret = 0;
+  //send sync on to master
   ret+=buffer_append(d,MASTER, buf_sync_on,0); 
-  ret+=buffer_append(d,MASTER, cmd,0); 
   ret+=buffer_send(d, MASTER); 
+  //send command to slave 
   ret+=buffer_append(d, SLAVE, cmd,0); 
-  ret+=buffer_send(d,MASTER); 
+  ret+=buffer_send(d,SLAVE); 
+
+  //send command, and then sync off to master
+  ret+=buffer_append(d,MASTER, cmd,0); 
   ret+=buffer_append(d,MASTER, buf_sync_off,0); 
   if (reg_to_read_after) 
   {
@@ -450,8 +456,8 @@ static int mark_buffers_done(nuphase_dev_t * d,  nuphase_buffer_mask_t buf)
       if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
       {
         //TODO this might occasionally legimitately happen? maybe? 
-        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
-        easy_break_point(); 
+//        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
+ //       easy_break_point(); 
       }
      //clear the bit
     }
@@ -568,16 +574,27 @@ int nuphase_sw_trigger(nuphase_dev_t * d )
   int ret = 0; 
 
   USING(d); 
-  ret = do_write(d->fd[0], buf); //always the master
+
+  if (NBD(d) < 2) 
+  {
+    int wrote; 
+    wrote = do_write(d->fd[0], buf); //always the master
+    ret = wrote == NP_SPI_BYTES ? 0 : -1;  
+  }
+  else
+  {
+    ret = synchronized_command(d, buf, 0,0,0); 
+  }
+
 
   DONE(d); 
-  return ret == NP_SPI_BYTES ? 0 : -1;  
+  return ret; 
 }
 
 
 int nuphase_calpulse(nuphase_dev_t * d, unsigned state) 
 {
-  uint8_t buf[4] = { REG_CALPULSE, 0,0, state & 0xff };  
+  uint8_t buf[4] = { REG_CALPULSE, 0,0, state};  
   int ret;
   USING(d); 
   ret = do_write(d->fd[0], buf); 
@@ -666,7 +683,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
   dev->spi_clock = SPI_CLOCK; 
   dev->cancel_wait = 0; 
   dev->event_counter = 0; 
-  memset(dev->next_read_buffer,0,sizeof(dev->next_read_buffer)); 
+  dev->next_read_buffer = 0; 
   dev->cs_change =NP_CS_CHANGE; 
   dev->delay_us =NP_DELAY_USECS; 
   dev->current_buf[0] = -1; 
@@ -698,9 +715,9 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
   dev->readout_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
   dev->channel_read_mask[0] = 0xff; 
-  dev->channel_read_mask[1] = 0xff; 
+  dev->channel_read_mask[1] = fd[1] ? 0xf : 0; 
   dev->board_id[0] = board_id_counter++; 
-  dev->board_id[1] = board_id_counter++; 
+  dev->board_id[1] = fd[1] ? board_id_counter++ : 0; 
 
   dev->enable_locking = locking; 
   memset(dev->nused,0,sizeof(dev->nused)); 
@@ -716,6 +733,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
  //check if this is a master or slave if locking is enabled
  uint8_t fwver[4]; 
  nuphase_read_register(dev, REG_FIRMWARE_VER, fwver, MASTER); 
+
  if (!fwver[1])
  {
    fprintf(stderr,"WARNING! The device chosen as master does not identify as master.\n"); 
@@ -903,7 +921,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
       if (d->cancel_wait) break; 
       usleep(POLL_USLEEP); 
       waited += POLL_USLEEP * 1e-6; //us to s 
-      something = nuphase_check_buffers(d,&d->hardware_next[which],which); 
+      something = nuphase_check_buffers(d,&d->hardware_next,which); 
   }
     int interrupted = d->cancel_wait; //were we interrupted? 
 
@@ -943,7 +961,7 @@ void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which)
 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
-    c->trigger_thresholds[i] = 0xfffff;  //TODO make this more sensible by default 
+    c->trigger_thresholds[i] = 0x9500;  //over 9000 
   }
 
   for (i = 0; i < NP_NUM_CHAN; i++)
@@ -951,7 +969,8 @@ void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which)
     c->attenuation[i] = 0;  //TODO make this more sensible by default 
   }
 
-  c->trigger = which == MASTER?  NP_TRIGGER_EXTIN | NP_TRIGGER_BEAMFORMING : NP_TRIGGER_EXTIN; 
+  c->trigger_enables = which == MASTER?  0x1f : 0x1e; 
+  c->phased_trigger_readout = which == MASTER ? 1 : 0; 
 
 }
 
@@ -1062,14 +1081,14 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force, n
 
   }
 
-  if (force || c->trigger != d->cfg[w].trigger)
+  if (force || c->trigger_enables!= d->cfg[w].trigger_enables)
   {
-    uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, 0, c->trigger}; 
+    uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, 0, c->trigger_enables}; 
 
     written = do_write(d->fd[w], trigger_enable_buf); 
     if (written == NP_SPI_BYTES) 
     {
-      d->cfg[w].trigger = c->trigger; 
+      d->cfg[w].trigger_enables = c->trigger_enables; 
     }
     else
     {
@@ -1078,6 +1097,23 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force, n
     }
   }
 
+  if (force || c->phased_trigger_readout!= d->cfg[w].phased_trigger_readout)
+  {
+    uint8_t trigger_buf[NP_SPI_BYTES] = {REG_PHASED_TRIGGER, 0, 0, c->phased_trigger_readout}; 
+
+    written = do_write(d->fd[w], trigger_buf); 
+    if (written == NP_SPI_BYTES) 
+    {
+      d->cfg[w].phased_trigger_readout = c->phased_trigger_readout; 
+    }
+    else
+    {
+      ret = -1; //don't try to continue if we fail . 
+      goto configure_end; 
+    }
+  }
+
+ 
   if (force || c->trigger_holdoff != d->cfg[w].trigger_holdoff)
   {
     uint8_t trigger_holdoff_buf[NP_SPI_BYTES] = {REG_TRIG_HOLDOFF, 0, 0, c->trigger_holdoff}; 
@@ -1174,16 +1210,16 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   for (iibuf = 0; iibuf < __builtin_popcount(mask); iibuf++)
   {
 
+    ibuf = d->next_read_buffer; 
     for (ibd = 0; ibd < NBD(d); ibd++)
     {
 
-      ibuf = d->next_read_buffer[ibd]; 
       //we are not reading this event right now
       if ( (mask & (1 << ibuf)) == 0)
       {
-        fprintf(stderr,"Sync issue? d->next_read_buffer=%d, mask=0x%x, hardware next: %d\n", d->next_read_buffer[ibd], mask, d->hardware_next[ibd]); 
+        fprintf(stderr,"Sync issue? d->next_read_buffer=%d, mask=0x%x, hardware next: %d\n", d->next_read_buffer, mask, d->hardware_next); 
         easy_break_point(); 
-        d->next_read_buffer[ibd] =  __builtin_ctz(mask); //pick the lowest buffer to read next 
+        d->next_read_buffer =  __builtin_ctz(mask); //pick the lowest buffer to read next 
         break; 
       }
 
@@ -1195,8 +1231,8 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       if (ibd == 0) 
       {
         d->event_counter++; 
+        d->next_read_buffer = (d->next_read_buffer + 1) %NP_NUM_BUFFER; 
       }
-      d->next_read_buffer[ibd] = (d->next_read_buffer[ibd] + 1) %NP_NUM_BUFFER; 
       CHK(buffer_append(d, ibd,  buf_buffer[ibuf],0)) 
       d->current_buf[ibd] = ibuf; 
 
@@ -1250,7 +1286,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
       if (d->event_counter !=  big_event_counter)
       {
-        fprintf(stderr,"Event counter mismatch!!! (sw: %"PRIu64", hw: %"PRIu64")\n", d->event_counter, big_event_counter); 
+        fprintf(stderr,"Event counter mismatch!!! (bd: %d sw: %"PRIu64", hw: %"PRIu64")\n", ibd, d->event_counter, big_event_counter); 
         easy_break_point(); 
       }
 
@@ -1258,13 +1294,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       tinfo = be32toh(tinfo); 
       tmask = be32toh(tmask); 
 
-      uint8_t hwbuf =  (tinfo >> 22) & 0x3; 
-      if ( hwbuf  != ibuf)
-      {
-        fprintf(stderr,"Buffer number mismatch!!! (sw: %u, hw: %u)\n", ibuf, hwbuf ); 
-        easy_break_point(); 
-      }
-      
+     
       if (ibd == 0)
       {
         hd[iout]->event_number = d->readout_number_offset + big_event_counter; 
@@ -1295,19 +1325,26 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
           hd[iout]->beam_power[ibeam] = be32toh(hd[iout]->beam_power[ibeam]) & 0xffffff; 
 
         }
+
+        uint8_t hwbuf =  (tinfo >> 22) & 0x3; 
+        if ( hwbuf  != ibuf)
+        {
+          fprintf(stderr,"Buffer number mismatch!!! (bd %d sw: %u, hw: %u)\n", ibd, ibuf, hwbuf ); 
+          easy_break_point(); 
+        }
+   
         hd[iout]->buffer_number = hwbuf; 
         hd[iout]->channel_overflow = 0; //TODO not implemented yet 
         hd[iout]->buffer_mask = mask; //this is the current buffer mask
         hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
         hd[iout]->calpulser = (tinfo >> 21) & 0x1; 
+        hd[iout]->channel_mask = (tmask >> 15) & 0xff; 
         ev[iout]->buffer_length = d->buffer_length; 
       }
+      hd[iout]->channel_read_mask[ibd] = d->channel_read_mask[ibd]; 
 
-      hd[iout]->channel_mask[ibd] = (tmask >> 15) & 0xff; 
       hd[iout]->deadtime[ibd] = be32toh(deadtime) & 0xffffff; 
       hd[iout]->board_id[ibd] = d->board_id[ibd]; 
-
-
       ev[iout]->board_id[ibd] = d->board_id[ibd]; 
 
       //now start to read the data 
@@ -1337,7 +1374,6 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         DONE(d); 
       }
 
-      mark_buffers_done(d, 1 << ibuf); 
 
 
       //zero out things that don't make sense if there is no slave
@@ -1347,15 +1383,14 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         hd[iout]->readout_time_ns[1] = 0; 
         hd[iout]->trig_time[1] = 0; 
         hd[iout]->deadtime[1] = 0; 
-        hd[iout]->channel_mask[1] = 0; 
         hd[iout]->board_id[1] = 0; 
         memset(ev[iout]->data[1],0, NP_NUM_CHAN * NP_MAX_WAVEFORM_LENGTH); 
 
       }
 
-      iout++; 
-
     }
+    mark_buffers_done(d, 1 << ibuf); 
+    iout++; 
 
   }
 
@@ -1428,7 +1463,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   st->deadtime = 0; //TODO 
   for (i = 0; i < NP_NUM_BEAMS; i++) 
   {
-    st->scalers[i] = wide_scalers[i][3] | (wide_scalers[i][2] << 8 ); 
+    st->scalers[i] = wide_scalers[i][3] | wide_scalers[i][2] << 8 ; 
   }
   st->readout_time = now.tv_sec; 
   st->readout_time_ns = now.tv_nsec; 
@@ -1548,7 +1583,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
     }
 
     //clear all buffers, and reset to zeor
-    wrote = write  (d->fd[ibd], buf_clear[0xf], NP_SPI_BYTES); 
+    wrote = do_write (d->fd[ibd], buf_clear[0xf]); 
 
     if (wrote != NP_SPI_BYTES) 
     {
@@ -1558,7 +1593,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
   }
 
 
-  memset(d->next_read_buffer,0,sizeof(d->next_read_buffer)); 
+  d->next_read_buffer = 0; 
 
   //do the calibration, if necessary 
   
@@ -1585,7 +1620,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
     d->buffer_length = NP_MAX_WAVEFORM_LENGTH; 
 
     //release the calpulser 
-    nuphase_calpulse(d, 1); 
+    nuphase_calpulse(d, 3); 
 
     while (!happy) 
     {
@@ -1604,7 +1639,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
 
         if (d->fd[1]) //synchronize the buf_adc_clk_rst
         {
-          if(!synchronized_command(d, buf_adc_clk_rst, 0,0,0))  
+          if(synchronized_command(d, buf_adc_clk_rst, 0,0,0))  
           {
             fprintf(stderr,"problem sending buf_adc_clk_rst\n"); 
             continue;
@@ -1728,7 +1763,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
    if (NBD(d) > 1) 
    {
      clock_gettime(CLOCK_REALTIME,&tbefore); 
-     if (!synchronized_command(d, buf_reset_counter,0,0,0))
+     if (synchronized_command(d, buf_reset_counter,0,0,0))
      {
         fprintf(stderr, "Unable to reset counters. Aborting reset\n"); 
         return 1; 
