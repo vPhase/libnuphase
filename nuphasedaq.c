@@ -28,7 +28,7 @@
 #define BOARD_CLOCK_HZ 25000000
 
 // master + slave
-#define NBD(d) d->fd[1] ? 2 : 1 
+#define NBD(d) (d->fd[1] ? 2 : 1)
 
 #define MIN_GOOD_MAX_V 20 
 #define MAX_MISERY 25 
@@ -678,6 +678,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
   //Configure the SPI protocol 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   int ifd = 0;
+
   for (ifd = 0; ifd < NBD(dev); ifd++)
   {
       ioctl(dev->fd[ifd], SPI_IOC_WR_MODE, &mode); 
@@ -797,8 +798,8 @@ int nuphase_fwinfo(nuphase_dev_t * d, nuphase_fwinfo_t * info, nuphase_which_boa
   info->date.year = (date[2] >> 4) + (date[1] << 4); 
 
   //TODO check this logic. not sure endianness is correct
-  uint64_t dna_low_big =  ((uint64_t) dna_low[3]) | ((uint64_t) dna_low[2]) << 8 || ((uint64_t) dna_low[1]) << 16;
-  uint64_t dna_mid_big =  ((uint64_t) dna_mid[3]) | ((uint64_t) dna_mid[2]) << 8 || ((uint64_t) dna_mid[1]) << 16;
+  uint64_t dna_low_big =  ((uint64_t) dna_low[3]) | ((uint64_t) dna_low[2]) << 8 | ((uint64_t) dna_low[1]) << 16;
+  uint64_t dna_mid_big =  ((uint64_t) dna_mid[3]) | ((uint64_t) dna_mid[2]) << 8 | ((uint64_t) dna_mid[1]) << 16;
   uint64_t dna_hi_big =   ((uint64_t) dna_hi[3])  | ((uint64_t)dna_hi[2]) << 8 ;
   info->dna =  (dna_low_big & 0xffffff) | ( (dna_mid_big & 0xffffff) << 24) | ( (dna_hi_big & 0xffff) << 48); 
 

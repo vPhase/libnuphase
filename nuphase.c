@@ -392,7 +392,7 @@ static int nuphase_event_generic_read(struct generic_file gf, nuphase_event_t *e
       {
         if (!ev->board_id[ibd]) 
         {
-          memset(ev->data[ibd], sizeof(ev->data[ibd]), 0); 
+          memset(ev->data[ibd],0, sizeof(ev->data[ibd])); 
           continue; 
         }
 
