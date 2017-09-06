@@ -223,6 +223,7 @@ static uint8_t buf_buffer[NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
+static uint8_t buf_reset_buf[NP_SPI_BYTES] = {REG_CLEAR,0,1,0};
 static uint8_t buf_pick_scaler[NP_NUM_BEAMS][NP_SPI_BYTES]; 
 
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
@@ -292,7 +293,6 @@ void fillBuffers()
   for (i = 0; i < (1 << NP_NUM_BUFFER); i++)
   {
     buf_clear[i][0] = REG_CLEAR; 
-    buf_clear[i][2] = i == 0xf ? 1 : 0;  //set buffer to zero when clearing all buffers 
     buf_clear[i][3] = i;  
   }
 
@@ -374,11 +374,19 @@ static int append_read_register(nuphase_dev_t *d, nuphase_which_board_t which, u
 static int synchronized_command(nuphase_dev_t *d, const uint8_t * cmd, uint8_t reg_to_read_after,
                                   uint8_t * result_master, uint8_t * result_slave) {
   
+  //just do a normal command
   if (NBD(d) < 2) 
   {
-    fprintf(stderr,"WARNING, tried a synchonized command, but not properly set up\n");
-
-    return -1; 
+    int ret =0; 
+    USING(d); 
+    ret += buffer_append(d,MASTER,cmd,0); 
+    if (reg_to_read_after)
+    {
+      ret+=append_read_register(d,MASTER, reg_to_read_after, result_master); 
+    }
+    ret+= buffer_send(d,MASTER); 
+    DONE(d); 
+    return ret; 
   }
 
   USING(d); 
@@ -394,17 +402,17 @@ static int synchronized_command(nuphase_dev_t *d, const uint8_t * cmd, uint8_t r
   //send command, and then sync off to master
   ret+=buffer_append(d,MASTER, cmd,0); 
   ret+=buffer_append(d,MASTER, buf_sync_off,0); 
-  if (reg_to_read_after) 
-  {
-    ret+=append_read_register(d, MASTER, reg_to_read_after, result_master); 
-  }
   ret+=buffer_send(d,MASTER); 
+
 
   if (reg_to_read_after) 
   {
+    ret+=append_read_register(d, MASTER, reg_to_read_after, result_master); 
     ret+=append_read_register(d, SLAVE, reg_to_read_after, result_slave); 
     ret+=buffer_send(d,SLAVE); 
+    ret+=buffer_send(d,MASTER); 
   }
+
 
   DONE(d); 
   return ret; 
@@ -456,10 +464,9 @@ static int mark_buffers_done(nuphase_dev_t * d,  nuphase_buffer_mask_t buf)
       if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
       {
         //TODO this might occasionally legimitately happen? maybe? 
-//        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
- //       easy_break_point(); 
+        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
+        easy_break_point(); 
       }
-     //clear the bit
     }
     else
     {
@@ -961,7 +968,7 @@ void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which)
 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
-    c->trigger_thresholds[i] = 0x9500;  //over 9000 
+    c->trigger_thresholds[i] = 0x9200;  //over 9000 
   }
 
   for (i = 0; i < NP_NUM_CHAN; i++)
@@ -970,7 +977,7 @@ void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which)
   }
 
   c->trigger_enables = which == MASTER?  0x1f : 0x1e; 
-  c->phased_trigger_readout = which == MASTER ? 1 : 0; 
+  c->phased_trigger_readout = 1; 
 
 }
 
@@ -1211,6 +1218,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   {
 
     ibuf = d->next_read_buffer; 
+    hd[iout]->sync_problem = 0; 
     for (ibd = 0; ibd < NBD(d); ibd++)
     {
 
@@ -1220,6 +1228,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         fprintf(stderr,"Sync issue? d->next_read_buffer=%d, mask=0x%x, hardware next: %d\n", d->next_read_buffer, mask, d->hardware_next); 
         easy_break_point(); 
         d->next_read_buffer =  __builtin_ctz(mask); //pick the lowest buffer to read next 
+        ibuf = d->next_read_buffer; 
         break; 
       }
 
@@ -1247,16 +1256,15 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       CHK(append_read_register(d,ibd,REG_TRIG_TIME_LOW,(uint8_t*)  &trig_time[0])) 
       CHK(append_read_register(d,ibd,REG_TRIG_TIME_HIGH,(uint8_t*)  &trig_time[1])) 
       CHK(append_read_register(d,ibd,REG_DEADTIME, (uint8_t*) &deadtime)) 
+      CHK(append_read_register(d,ibd,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
 
       if (ibd == 0)  // these don't make sense for a slave 
       {
-        CHK(append_read_register(d,ibd,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
         CHK(append_read_register(d,ibd,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
         for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
         {
           CHK(append_read_register(d,ibd, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
         }
-   
       }
 
      //flush the metadata .  we could get slightly faster throughput by storing metadata 
@@ -1269,9 +1277,6 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 #ifdef DEBUG_PRINTOUTS
       printf("Raw tinfo: %x\n", tinfo) ;
       printf("Raw tmask: %x\n", tmask) ;
-      printf("Raw event_counter: %x %x\n", event_counter[0], event_counter[1]) ;
-      printf("Raw trig_counter: %x %x\n", trig_counter[0], trig_counter[1]) ;
-      printf("Raw trig_time: %x %x \n", trig_time[0], trig_time[1]) ;
 #endif 
       
       // check the event counter
@@ -1282,11 +1287,18 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       trig_time[0] = be32toh(trig_time[0]) & 0xffffff; 
       trig_time[1] = be32toh(trig_time[1]) & 0xffffff; 
 
+#ifdef DEBUG_PRINTOUTS
+      printf("Raw event_counter: %x %x\n", event_counter[0], event_counter[1]) ;
+      printf("Raw trig_counter: %x %x\n", trig_counter[0], trig_counter[1]) ;
+      printf("Raw trig_time: %x %x \n", trig_time[0], trig_time[1]) ;
+#endif 
+
+
       uint64_t big_event_counter = event_counter[0] + (event_counter[1] << 24); 
 
       if (d->event_counter !=  big_event_counter)
       {
-        fprintf(stderr,"Event counter mismatch!!! (bd: %d sw: %"PRIu64", hw: %"PRIu64")\n", ibd, d->event_counter, big_event_counter); 
+        fprintf(stderr,"Event counter mismatch!!! (bd: %s sw: %"PRIu64", hw: %"PRIu64")\n", ibd ? "SLAVE" : "MASTER" , d->event_counter, big_event_counter); 
         easy_break_point(); 
       }
 
@@ -1294,22 +1306,29 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       tinfo = be32toh(tinfo); 
       tmask = be32toh(tmask); 
 
-     
-      if (ibd == 0)
+      uint8_t hwbuf =  (tinfo >> 22) & 0x3; 
+      if ( hwbuf  != ibuf)
       {
-        hd[iout]->event_number = d->readout_number_offset + big_event_counter; 
-        ev[iout]->event_number = hd[iout]->event_number; 
-        hd[iout]->trig_number = trig_counter[0] + (trig_counter[1] << 24); 
+          fprintf(stderr,"Buffer number mismatch!!! (bd %d sw: %u, hw: %u)\n", ibd, ibuf, hwbuf ); 
+          easy_break_point(); 
+          hd[iout]->sync_problem |= 1; 
       }
+     
 
-      hd[iout]->buffer_length = d->buffer_length; 
-      hd[iout]->pretrigger_samples = d->cfg[ibd].pretrigger* 8 * 16; //TODO define these constants somewhere
       hd[iout]->readout_time[ibd] = now.tv_sec; 
       hd[iout]->readout_time_ns[ibd] = now.tv_nsec; 
       hd[iout]->trig_time[ibd] =trig_time[0] + (trig_time[1] << 24); 
-
-      if (ibd == 0) 
+      hd[iout]->channel_read_mask[ibd] = d->channel_read_mask[ibd]; 
+      hd[iout]->deadtime[ibd] = be32toh(deadtime) & 0xffffff; 
+      hd[iout]->board_id[ibd] = d->board_id[ibd]; 
+ 
+      //values that we only save for the master
+      if (ibd == 0)
       {
+        hd[iout]->event_number = d->readout_number_offset + big_event_counter; 
+        hd[iout]->trig_number = trig_counter[0] + (trig_counter[1] << 24); 
+        hd[iout]->buffer_length = d->buffer_length; 
+        hd[iout]->pretrigger_samples = d->cfg[ibd].pretrigger* 8 * 16; //TODO define these constants somewhere
         hd[iout]->approx_trigger_time= d->start_time.tv_sec + hd[iout]->trig_time[ibd] / BOARD_CLOCK_HZ; 
         hd[iout]->approx_trigger_time_nsecs = d->start_time.tv_nsec + (hd[iout]->trig_time[ibd] % BOARD_CLOCK_HZ) *(1.e9 / BOARD_CLOCK_HZ); 
         if (hd[iout]->approx_trigger_time_nsecs > 1e9) 
@@ -1323,28 +1342,46 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         for (ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
         {
           hd[iout]->beam_power[ibeam] = be32toh(hd[iout]->beam_power[ibeam]) & 0xffffff; 
-
         }
 
-        uint8_t hwbuf =  (tinfo >> 22) & 0x3; 
-        if ( hwbuf  != ibuf)
-        {
-          fprintf(stderr,"Buffer number mismatch!!! (bd %d sw: %u, hw: %u)\n", ibd, ibuf, hwbuf ); 
-          easy_break_point(); 
-        }
-   
+  
         hd[iout]->buffer_number = hwbuf; 
         hd[iout]->channel_overflow = 0; //TODO not implemented yet 
         hd[iout]->buffer_mask = mask; //this is the current buffer mask
         hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
         hd[iout]->calpulser = (tinfo >> 21) & 0x1; 
         hd[iout]->channel_mask = (tmask >> 15) & 0xff; 
-        ev[iout]->buffer_length = d->buffer_length; 
-      }
-      hd[iout]->channel_read_mask[ibd] = d->channel_read_mask[ibd]; 
 
-      hd[iout]->deadtime[ibd] = be32toh(deadtime) & 0xffffff; 
-      hd[iout]->board_id[ibd] = d->board_id[ibd]; 
+
+        //event stuff
+        ev[iout]->buffer_length = d->buffer_length; 
+        ev[iout]->event_number = hd[iout]->event_number; 
+ 
+      }
+      else //do some checks
+      {
+
+        if (hd[iout]->trig_number != trig_counter[0] + (trig_counter[1] << 24))
+        {
+          fprintf(stderr,"trig number mismatch between master and slave!\n"); 
+          hd[iout]->sync_problem |= 2; 
+        }
+
+        if (abs(hd[iout]->trig_time[ibd] -  hd[iout]->trig_time[0] > 1 ))
+        {
+          fprintf(stderr,"Trig times differ by more than 1 clock cycle between boards!\n"); 
+          hd[iout]->sync_problem |= 4; 
+        }
+
+        if (hwbuf != hd[iout]->buffer_number)
+        {
+
+          fprintf(stderr,"Buffer numbers differe between boards!\n"); 
+          hd[iout]->sync_problem |=8; 
+        }
+      }
+
+
       ev[iout]->board_id[ibd] = d->board_id[ibd]; 
 
       //now start to read the data 
@@ -1359,7 +1396,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
         if (d->current_buf[ibd] != ibuf)
         {
-          CHK(buffer_append(d,ibd, buf_mode[MODE_WAVEFORMS],0))
+          CHK(buffer_append(d,ibd, buf_buffer[ibuf],0))
         }
 
         if (d->channel_read_mask[ibd] & (1 << ichan)) //TODO is this backwards?!??? 
@@ -1373,7 +1410,6 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         }
         DONE(d); 
       }
-
 
 
       //zero out things that don't make sense if there is no slave
@@ -1581,11 +1617,16 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
         fprintf(stderr, "Unable to clear masks. Aborting reset\n"); 
         return 1; 
     }
+  }
 
+
+  for (ibd = 0; ibd < NBD(d); ibd++)
+  {
     //clear all buffers, and reset to zeor
     wrote = do_write (d->fd[ibd], buf_clear[0xf]); 
+    wrote += do_write (d->fd[ibd], buf_reset_buf); 
 
-    if (wrote != NP_SPI_BYTES) 
+    if (wrote != 2*NP_SPI_BYTES) 
     {
         fprintf(stderr, "Unable to clear buffers. Aborting reset\n"); 
         return 1; 
@@ -1794,7 +1835,8 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
      ret += nuphase_configure(d,cslave,1,SLAVE); 
 
    }
-   return ret ||  nuphase_configure(d,c,1,MASTER); 
+   ret += nuphase_configure(d,c,1,MASTER); 
+   return ret ; 
 }
 
 int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock) 
