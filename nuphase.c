@@ -577,9 +577,12 @@ int nuphase_status_print(FILE *f, const nuphase_status_t *st)
   gmtime_r((time_t*) &t, &tim); 
   strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
   fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id, timstr, st->readout_time_ns); 
+
+  fprintf(f,"\t which \t 0.1 Hz, gated 0.1Hz, 1 Hz\n"); 
+  fprintf(f,\t"GLOBAL: \t%u \t%u \t%u", st->global_scalers[SCALER_SLOW], st->global_scalers[SCALER_SLOW_GATED], st->global_scalers[SCALER_FAST]); 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
-    fprintf(f,"\tBEAM %d:  %u \n",i, st->scalers[i]); 
+    fprintf(f,"\tBEAM %d: \t%u \t%u \t%u \n",i, st->beam_scalers[SCALER_SLOW][i], st- >beam_scalers[SCALER_SLOW_GATED][i], st->beam_scalers[SCALER_FAST][i]); 
   }
   return 0; 
 }
@@ -596,7 +599,7 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
 
   fprintf(f, "EVENT_NUMBER %"PRIu64"\n", hd->event_number ); 
   fprintf(f, "\t%s TRIGGER\n", trig_type_names[hd->trig_type]); 
-  fprintf(f,  "\ttrig num: %"PRIu64" boards: [%d,%d]\n", hd->trig_number, hd->board_id[0], hd->board_id[1]); 
+  fprintf(f,  "\ttrig num: %"PRIu64" boards: [%d,%d], sync_problem: %x\n", hd->trig_number, hd->board_id[0], hd->board_id[1], hd->sync_problem); 
   fprintf(f, "\tbuf len: %u ; pretrig: %u\n", hd->buffer_length, hd->pretrigger_samples); 
   fprintf(f,"\tbuf num: %u, buf_mask: %x\n", hd->buffer_number, hd->buffer_mask); 
   t = hd->readout_time[0];

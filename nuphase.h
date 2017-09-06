@@ -44,6 +44,8 @@ extern "C" {
 /** The number of trigger beams available */ 
 #define NP_NUM_BEAMS 15 
 
+#define NP_NUM_SCALERS 3
+
 /** Error codes for read/write */ 
 typedef enum 
 {
@@ -99,6 +101,7 @@ typedef struct nuphase_header
   uint8_t board_id[NP_MAX_BOARDS];               //!< The board number assigned at startup. If board_id[1] == 0, no slave. 
   nuphase_trig_type_t trig_type;                 //!< The trigger type? 
   uint8_t calpulser;                             //!< Was the calpulser on? 
+  uint8_t sync_problem;                          //!< Various sync problems. TODO convert to enum 
 } nuphase_header_t; 
 
 /**nuphase event body.
@@ -118,9 +121,22 @@ typedef struct nuphase_event
 /** nuphase status. 
  * Holds scalers, deadtime, and maybe some other things 
  **/
+
+
+
+
+typedef enum nuphase_scaler_type
+{
+  SCALER_SLOW, 
+  SCALER_SLOW_GATED,
+  SCALER_FAST
+} nuphase_scaler_type_t; 
+
+
 typedef struct nuphase_status
 {
-  uint16_t scalers[NP_NUM_BEAMS];  //!< The scaler for each beam (12 bits) 
+  uint16_t global_scalers[NP_NUM_SCALERS];
+  uint16_t beam_scalers[NP_NUM_SCALERS][NP_NUM_BEAMS];  //!< The scaler for each beam (12 bits) 
   uint32_t deadtime;               //!< The deadtime fraction (units tbd) 
   uint32_t readout_time;           //!< CPU time of readout, seconds
   uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
