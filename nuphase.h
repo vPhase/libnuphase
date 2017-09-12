@@ -145,6 +145,35 @@ typedef struct nuphase_status
 } nuphase_status_t; 
 
 
+/** bitmask of what is on */ 
+typedef enum nuphase_power_state
+{
+  NP_POWER_SWITCH = 1, 
+  NP_POWER_MASTER = 2, 
+  NP_POWER_SLAVE  = 4, 
+  NP_POWER_SBC    = 8, 
+  NP_POWER_FOAM   = 16 
+} nuphase_power_state_t; 
+
+typedef struct nuphase_hk
+{
+  uint32_t unixTime; 
+  uint16_t unixTimeMillisecs; 
+  int8_t temp_master;  //C
+  int8_t temp_slave; 
+  int8_t temp_case; 
+  int8_t temp_asps_uc; 
+  uint16_t current_master; //mA
+  uint16_t current_slave; 
+  uint16_t current_foam; 
+  uint16_t current_sbc; 
+  uint16_t current_switch; 
+  nuphase_power_state_t state; 
+  uint32_t disk_space_kB; 
+  uint32_t free_mem_kB;  
+} nuphase_hk_t; 
+
+
 /** print the status  prettily */
 int nuphase_status_print(FILE *f, const nuphase_status_t * st) ; 
 
@@ -153,6 +182,9 @@ int nuphase_header_print(FILE *f, const nuphase_header_t * h) ;
 
 /** print the event prettily. The separator character will be used to separate different fields so you can dump it into a spreadsheet or something */
 int nuphase_event_print(FILE *f, const nuphase_event_t * ev, char sep) ; 
+
+/** Print the HK status pretilly */ 
+int nuphase_hk_print(FILE * f, const nuphase_hk_t * hk); 
 
 /** write this header to file. The size will be different than sizeof(nuphase_header_t). Returns 0 on success. */
 int nuphase_header_write(FILE * f, const nuphase_header_t * h); 
@@ -189,6 +221,19 @@ int nuphase_status_gzwrite(gzFile f, const nuphase_status_t * ev);
 
 /** Read the status from a compressed file. Returns 0 on success. The number of bytes read is not sizeof(nuphase_status_t). */ 
 int nuphase_status_gzread(gzFile f, nuphase_status_t * ev); 
+
+/** write this hk to file. The size will be different than sizeof(nuphase_hk_t). Returns 0 on success. */
+int nuphase_hk_write(FILE * f, const nuphase_hk_t * h); 
+
+/** write this hk to compressed file. The size will be different than sizeof(nuphase_hk_t). Returns 0 on success. */
+int nuphase_hk_gzwrite(gzFile f, const nuphase_hk_t * h); 
+
+/** read this hk from file. The size will be different than sizeof(nuphase_hk_t). Returns 0 on success. */ 
+int nuphase_hk_read(FILE * f, nuphase_hk_t * h); 
+
+/** read this hk from compressed file. The size will be different than sizeof(nuphase_hk_t). Returns 0 on success. */ 
+int nuphase_hk_gzread(gzFile  f, nuphase_hk_t * h); 
+
 
 
 #ifdef __cplusplus
