@@ -32,7 +32,7 @@ void viewer(const char * hdfile, const char * evfile, int i = 0)
 
       TString name = TString::Format("c_%llu_%d", ev.event_number, ev.board_id[ibd]);
       TString title = TString::Format("ev %llu bd%d", ev.event_number, ev.board_id[ibd]);
-      TCanvas *c = new TCanvas(name,title, 800,1000); 
+      TCanvas *c = new TCanvas(name,title, 1800,1000); 
       c->Divide(2,4); 
 
       for (int ich = 0; ich < NP_NUM_CHAN; ich++)
