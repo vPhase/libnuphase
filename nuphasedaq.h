@@ -130,8 +130,8 @@ typedef enum nuphase_reset_type
  * @param power_gpio_number If positive, the GPIO that controls the board (and should be enabled at start) 
  * @param cfg    If non-zero, this config is used instead of the default initial one.
  * @param cfg_slave    If non-zero, this config is used for the slave instead of the default initial one.
- * @param sync_access  If non-zero a mutex will be initialized that will control concurrent access 
- *                     to this device from multiple threads. ALSO ENABLES MASTER/SLAVE MODE ( enables synchronization of sw triggers / buffer clears) . 
+ * @param thread_safe  If non-zero a mutex will be initialized that will control concurrent access 
+ *                     to this device from multiple threads.
  *
  *
  * @returns a pointer to the file descriptor, or 0 if something went wrong. 
@@ -141,7 +141,7 @@ nuphase_dev_t * nuphase_open(const char * spi_master_device_name,
                              int power_gpio_number, 
                              const nuphase_config_t * cfg,
                              const nuphase_config_t * cfg_slave,
-                             int sync_access) ; 
+                             int thread_safe) ; 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
 int nuphase_close(nuphase_dev_t * d); 
