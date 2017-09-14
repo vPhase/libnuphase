@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// attenuation_scan prefix [n=100] [steps=16] 
+// attenuation_scan prefix [n=100] [steps=16] [calpulse=0] 
 
 
 #ifdef __arm__ 
@@ -56,12 +56,13 @@ int main(int nargs, char ** args )
   nuphase_event_t ev[4]; 
 
 
+  int calpulse = 0; 
   int n = 100; 
   int steps = 16; 
   int step; 
   if (nargs < 2) 
   {
-    printf("Usage: attenuation_scan prefix [n=100] [steps=16]\n"); 
+    printf("Usage: attenuation_scan prefix [n=100] [steps=16] [calpulse=0]\n"); 
     return 1; 
   }
 
@@ -74,7 +75,14 @@ int main(int nargs, char ** args )
   if (nargs > 3) 
   {
     steps = atoi(args[3]); 
+
   }
+
+  if (nargs > 4) 
+  {
+    calpulse = atoi(args[4]); 
+  }
+
 
   signal(SIGINT, catch_interrupt); 
   nuphase_config_t  cmaster; 
@@ -85,6 +93,7 @@ int main(int nargs, char ** args )
   cmaster.phased_trigger_readout=0; 
 
   dev =  nuphase_open("/dev/spidev2.0","/dev/spidev1.0",0,&cmaster,&cslave,0); //no interrupt for now and no threadlocking
+  nuphase_calpulse(dev,calpulse); 
 
   for (step = 0; step < steps; step++) 
   {
@@ -96,8 +105,8 @@ int main(int nargs, char ** args )
     FILE * fhd, *fev;
 
     printf("Taking %d events at attenuation %d\n", n, attenuation); 
-    sprintf(header_file_name,"%s_hd_atten%d.dat", prefix, attenuation); 
-    sprintf(event_file_name,"%s_ev_atten%d.dat", prefix, attenuation); 
+    sprintf(header_file_name,"%shd_atten_%03d.dat", prefix, attenuation); 
+    sprintf(event_file_name,"%sev_atten_%03d.dat", prefix, attenuation); 
 
     fhd  = fopen(header_file_name ,"w"); 
     fev = fopen(event_file_name ,"w"); 
@@ -137,6 +146,7 @@ int main(int nargs, char ** args )
   }
 
 
+  nuphase_calpulse(dev,0); 
   nuphase_close(dev); 
 
   return 0; 

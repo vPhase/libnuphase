@@ -685,6 +685,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
 
 
   dev = malloc(sizeof(nuphase_dev_t)); 
+  memset(dev,0,sizeof(*dev)); 
   dev->gpio_pin = gpio_pin; 
   dev->device_name[0] = devicename_master; 
   dev->device_name[1] = devicename_slave; 
@@ -970,7 +971,7 @@ void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which)
 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
-    c->trigger_thresholds[i] = 10000;  //over 9000 
+    c->trigger_thresholds[i] = 0xfffff;  //
   }
 
   for (i = 0; i < NP_NUM_CHAN; i++)
@@ -1054,7 +1055,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force, n
     if(!ret)
     {
       //success! 
-      memcpy(d->cfg[w].trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
+      memmove(d->cfg[w].trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
     }
     else 
     {
@@ -1080,7 +1081,7 @@ int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force, n
     if (!ret)
     {
       //success! 
-      memcpy(d->cfg[w].attenuation, c->attenuation, sizeof(c->attenuation)); 
+      memmove(d->cfg[w].attenuation, c->attenuation, sizeof(c->attenuation)); 
     }
     else
     {
@@ -1363,9 +1364,11 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       else //do some checks
       {
 
+
+
         if (hd[iout]->trig_number != trig_counter[0] + (trig_counter[1] << 24))
         {
-          fprintf(stderr,"trig number mismatch between master and slave!\n"); 
+          fprintf(stderr,"trig number mismatch between master and slave %llu vs %llu!\n", hd[iout]->trig_number, (uint64_t) trig_counter[0] + (trig_counter[1] <<24)); 
           hd[iout]->sync_problem |= 2; 
         }
 
@@ -1389,28 +1392,31 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       //now start to read the data 
       for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
       {
-        USING(d);  
-        if (d->current_mode[ibd] != MODE_WAVEFORMS)
+        if ( d->channel_read_mask[ibd] & ( 1 << ichan) )
         {
-          CHK(buffer_append(d,ibd, buf_mode[MODE_WAVEFORMS],0))
-          d->current_mode[ibd] = MODE_WAVEFORMS; 
-        }
+          USING(d);  
+          if (d->current_mode[ibd] != MODE_WAVEFORMS)
+          {
+            CHK(buffer_append(d,ibd, buf_mode[MODE_WAVEFORMS],0))
+            d->current_mode[ibd] = MODE_WAVEFORMS; 
+          }
 
-        if (d->current_buf[ibd] != ibuf)
-        {
-          CHK(buffer_append(d,ibd, buf_buffer[ibuf],0))
-        }
+          if (d->current_buf[ibd] != ibuf)
+          {
+            CHK(buffer_append(d,ibd, buf_buffer[ibuf],0))
+          }
 
-        if (d->channel_read_mask[ibd] & (1 << ichan)) //TODO is this backwards?!??? 
-        {
-          CHK(buffer_append(d,ibd, buf_channel[ichan],0)) 
-          CHK(loop_over_chunks_half_duplex(d,ibd, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, ev[iout]->data[ibd][ichan]))
+          if (d->channel_read_mask[ibd] & (1 << ichan)) //TODO is this backwards?!??? 
+          {
+            CHK(buffer_append(d,ibd, buf_channel[ichan],0)) 
+            CHK(loop_over_chunks_half_duplex(d,ibd, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, &ev[iout]->data[ibd][ichan][0]))
+          }
+          DONE(d); 
         }
         else
         {
-          memset(ev[iout]->data[ibd][ichan], 0 , hd[iout]->buffer_length); 
+          memset(&ev[iout]->data[ibd][ichan][0], 0 , d->buffer_length); 
         }
-        DONE(d); 
       }
 
 
@@ -1426,6 +1432,9 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
       }
 
+      USING(d); 
+      CHK(buffer_send(d,ibd)); 
+      DONE(d); 
     }
     mark_buffers_done(d, 1 << ibuf); 
     iout++; 
@@ -1638,7 +1647,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
 
   for (ibd = 0; ibd < NBD(d); ibd++)
   {
-    //clear all buffers, and reset to zeor
+    //clear all buffers, and reset to zero
     wrote = do_write (d->fd[ibd], buf_clear[0xf]); 
     wrote += do_write (d->fd[ibd], buf_reset_buf); 
 
@@ -1857,13 +1866,20 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
 
 
    //finally we must configure it the way we like it (slave first, so that we don't start triggering) 
+   //also, let's switch off the input while doing this just in case 
+
    int ret  = 0; 
+
+   nuphase_calpulse(d, 2); 
+
    if (NBD(d) > 1)
    {
      ret += nuphase_configure(d,cslave,1,SLAVE); 
 
    }
    ret += nuphase_configure(d,c,1,MASTER); 
+
+   nuphase_calpulse(d, 0); 
    return ret ; 
 }
 
