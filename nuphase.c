@@ -346,7 +346,7 @@ static int nuphase_event_generic_write(struct generic_file gf, const nuphase_eve
     if (!ev->board_id[ibd]) continue; 
     for (i = 0; i <NP_NUM_CHAN; i++)
     {
-      written = generic_write(gf, ev->buffer_length, ev->data[ibd][i]); 
+      written = generic_write(gf, ev->buffer_length, &ev->data[ibd][i][0]); 
       if (written != ev->buffer_length) 
       {
         return NP_ERR_NOT_ENOUGH_BYTES; 
