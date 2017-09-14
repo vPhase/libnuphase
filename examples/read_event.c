@@ -36,7 +36,7 @@ int main(int nargs, char ** args )
   nuphase_set_readout_number_offset(dev,0); 
   nuphase_set_buffer_length(dev,127*16); 
 
-  nuphase_calpulse(dev,0); 
+  nuphase_calpulse(dev,3); 
   if (sw_trigger) 
   {
       nuphase_sw_trigger(dev); 
@@ -65,7 +65,7 @@ int main(int nargs, char ** args )
   nuphase_event_write(fev,&ev); 
 
   nuphase_header_print(stdout, &hd); 
-//  nuphase_event_print(stdout, &ev, ','); 
+  nuphase_event_print(stdout, &ev, ','); 
 
   nuphase_calpulse(dev,0); 
   nuphase_close(dev); 
