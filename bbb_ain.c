@@ -22,5 +22,6 @@ int bbb_ain_raw(int ain)
 float bbb_ain_mV(int ain) 
 {
   int raw = bbb_ain_raw(ain); 
+  if (raw < 0) return -1; 
   return raw *1800 / 4095.; 
 }
