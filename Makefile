@@ -11,8 +11,8 @@ LIBDIR=lib
 
 .PHONY: clean install doc
 
-HEADERS = nuphase.h nuphasedaq.h bbb_gpio.h
-OBJS = nuphase.o nuphasedaq.o bbb_gpio.o 
+HEADERS = nuphase.h nuphasedaq.h bbb_gpio.h bbb_ain.h
+OBJS = nuphase.o nuphasedaq.o bbb_gpio.o bbb_ain.o 
 
 libnuphase.so: $(OBJS) $(HEADERS)
 	$(CC) -shared $(OBJS) -o $@ $(LDFLAGS) 
