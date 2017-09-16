@@ -18,7 +18,7 @@ HEADERS = nuphase.h
 OBJS = nuphase.o 
 
 DAQ_HEADERS = nuphasedaq.h nuphasehk.h bbb_gpio.h bbb_ain.h 
-DAQ_OBJS = nuphasedaq.o nuphase.o bbb_gpio.o bbb_ain.o 
+DAQ_OBJS = nuphasedaq.o nuphasehk.o bbb_gpio.o bbb_ain.o 
 
 all: libnuphase.so libnuphasedaq.so 
 
