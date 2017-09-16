@@ -765,11 +765,14 @@ int nuphase_hk_print(FILE * f, const nuphase_hk_t *hk)
   fprintf(f,"      CASE  :  %d C\n", hk->temp_case); 
   fprintf(f,"      ASPSuC:  %d C\n", hk->temp_asps_uc); 
   fprintf(f,"  Power: \n"); 
-  fprintf(f,"      MASTER:  %s (%d mA) \n", (hk->state & NP_POWER_MASTER)  ? "ON ":"OFF",  hk->current_master); 
-  fprintf(f,"      SLAVE :  %s (%d mA) \n", (hk->state & NP_POWER_SLAVE)  ? "ON ":"OFF",  hk->current_slave); 
-  fprintf(f,"      FOAM  :  %s (%d mA) \n", (hk->state & NP_POWER_FOAM)  ? "ON ":"OFF",  hk->current_foam); 
-  fprintf(f,"      SBC   :  %s (%d mA) \n", (hk->state & NP_POWER_SBC)  ? "ON ":"OFF",  hk->current_sbc); 
-  fprintf(f,"      SWITCH:  %s (%d mA) \n", (hk->state & NP_POWER_SWITCH)  ? "ON ":"OFF",  hk->current_switch); 
+  fprintf(f,"      MASTER:  %s (%d mA) \n", (hk->on_state & NP_POWER_MASTER)  ? "ON ":"OFF",  hk->current_master); 
+  fprintf(f,"      SLAVE :  %s (%d mA) \n", (hk->on_state & NP_POWER_SLAVE)  ? "ON ":"OFF",  hk->current_slave); 
+  fprintf(f,"      FRNTND:  %s (%d mA) \n", (hk->on_state & NP_POWER_FRONTEND)  ? "ON ":"OFF",  hk->current_frontend); 
+  fprintf(f,"      SBC   :  %s (%d mA) \n", (hk->on_state & NP_POWER_SBC)  ? "ON ":"OFF",  hk->current_sbc); 
+  fprintf(f,"      SWITCH:  %s (%d mA) \n", (hk->on_state & NP_POWER_SWITCH)  ? "ON ":"OFF",  hk->current_switch); 
+  fprintf(f,"      MASTER_FPGA:  %s (%d mA) \n", ( (hk->fpga_state & NP_FPGA_POWER_MASTER) && ( hk->on_state & NP_POWER_MASTER) )  ? "ON ":"OFF",  hk->current_switch); 
+  fprintf(f,"      SLAVE_FPGA:  %s (%d mA) \n", ( (hk->fpga_state & NP_FPGA_POWER_SLAVE) && ( hk->on_state & NP_POWER_SLAVE) )  ? "ON ":"OFF",  hk->current_switch); 
+ 
   fprintf(f,"  SBC: \n"); 
   fprintf(f,"     DISK SPACE: %0.3g MB \n", hk->disk_space_kB /1024.);  
   fprintf(f,"     FREE MEM  : %0.3g MB \n", hk->free_mem_kB   /1024.);  

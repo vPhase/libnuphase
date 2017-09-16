@@ -160,7 +160,7 @@ typedef enum nuphase_asps_power_state
 typedef enum nuphase_fpga_power_state
 {
   NP_FPGA_POWER_MASTER = 1, 
-  NP_FPGA_POWER_SLAVE = 2; 
+  NP_FPGA_POWER_SLAVE = 2 
 } nuphase_fpga_power_state_t; 
 
 
@@ -177,9 +177,9 @@ typedef struct nuphase_hk
   uint16_t current_frontend; 
   uint16_t current_sbc; 
   uint16_t current_switch; 
-  nuphase_asps_power_state_t on_state; 
-  nuphase_asps_power_state_t fault_state; 
-  nuphase_fpga_power_state_t fpga_state; 
+  nuphase_asps_power_state_t on_state : 8; 
+  nuphase_asps_power_state_t fault_state : 8; 
+  nuphase_fpga_power_state_t fpga_state : 8; 
   uint32_t disk_space_kB; 
   uint32_t free_mem_kB;  
 } nuphase_hk_t; 
