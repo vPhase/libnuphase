@@ -84,13 +84,6 @@ bbb_gpio_direction_t bbb_gpio_dir(const bbb_gpio_pin_t * pin)
 
 int bbb_gpio_get(bbb_gpio_pin_t * pin) 
 {
-  if (pin->dir != BBB_IN) 
-  {
-    fprintf(stderr,"Trying to get pin %d which has the wrong direction\n", pin->num); 
-    return -1; 
-  }
-
-
   char st; 
   if ( read(pin->fd, &st, 1) <0)
   {
@@ -105,12 +98,6 @@ int bbb_gpio_get(bbb_gpio_pin_t * pin)
 
 int bbb_gpio_set(bbb_gpio_pin_t * pin, int state) 
 {
-  if (pin->dir != BBB_OUT) 
-  {
-    fprintf(stderr,"Trying to set pin %d which has the wrong direction\n", pin->num); 
-    return -1; 
-  }
-
   char st= '0' + !!state; 
 
   if ( write(pin->fd, &st, 1) <0)

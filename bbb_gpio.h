@@ -33,11 +33,10 @@ int bbb_gpio_set_direction(bbb_gpio_pin_t * pin, bbb_gpio_direction_t dir);
 
 
 /** Sets the pin value to the given state. returns 0 on success, -1 if something went wrong.. 
- * Make sure you set the direction to out first! 
  */
 int bbb_gpio_set(bbb_gpio_pin_t * pin, int state); 
 
-/** Gets the bin value (0 or 1). Returns -1 if something went wrong. Make sure you set the direction first! */ 
+/** Gets the bin value (0 or 1). Returns -1 if something went wrong.  */ 
 int bbb_gpio_get(bbb_gpio_pin_t * pin); 
 
 /** Close the gpio pin. Return 0 on success */ 
