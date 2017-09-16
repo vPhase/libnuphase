@@ -24,7 +24,6 @@ all: libnuphase.so libnuphasedaq.so
 
 client: libnuphase.so 
 
-
 libnuphase.so: $(OBJS) $(HEADERS)
 	$(CC) -shared $(OBJS) -o $@ $(LDFLAGS) 
 
