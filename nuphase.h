@@ -145,30 +145,41 @@ typedef struct nuphase_status
 } nuphase_status_t; 
 
 
-/** bitmask of what is on */ 
-typedef enum nuphase_power_state
+/** bitmask of what is on , according to ASPS-DAQ*/ 
+typedef enum nuphase_asps_power_state
 {
-  NP_POWER_SWITCH = 1, 
-  NP_POWER_MASTER = 2, 
-  NP_POWER_SLAVE  = 4, 
-  NP_POWER_SBC    = 8, 
-  NP_POWER_FOAM   = 16 
-} nuphase_power_state_t; 
+  NP_POWER_FRONTEND = 1,
+  NP_POWER_SBC      = 2, 
+  NP_POWER_SLAVE    = 4, 
+  NP_POWER_MASTER   = 8, 
+  NP_POWER_SWITCH   = 16  
+
+} nuphase_asps_power_state_t; 
+
+/* Power state of FPGA (the board can be on but the FPGA off) */ 
+typedef enum nuphase_fpga_power_state
+{
+  NP_FPGA_POWER_MASTER = 1, 
+  NP_FPGA_POWER_SLAVE = 2; 
+} nuphase_fpga_power_state_t; 
+
 
 typedef struct nuphase_hk
 {
   uint32_t unixTime; 
   uint16_t unixTimeMillisecs; 
-  int8_t temp_master;  //C
-  int8_t temp_slave; 
+  int8_t temp_master;  //C, or -128 if off
+  int8_t temp_slave;   //C, or -128 if off 
   int8_t temp_case; 
   int8_t temp_asps_uc; 
   uint16_t current_master; //mA
   uint16_t current_slave; 
-  uint16_t current_foam; 
+  uint16_t current_frontend; 
   uint16_t current_sbc; 
   uint16_t current_switch; 
-  nuphase_power_state_t state; 
+  nuphase_asps_power_state_t on_state; 
+  nuphase_asps_power_state_t fault_state; 
+  nuphase_fpga_power_state_t fpga_state; 
   uint32_t disk_space_kB; 
   uint32_t free_mem_kB;  
 } nuphase_hk_t; 
