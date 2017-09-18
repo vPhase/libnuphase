@@ -11,7 +11,7 @@
  *
  *   To set the ASPS power state, use nuphase_set_asps_power_state
  *
- *   To set the GPIO 
+ *   To set the GPIO power states  
  *
  *  Cosmin Deaconu
  *  <cozzyd@kicp.uchicago.edu> 
@@ -30,11 +30,7 @@ typedef enum nuphase_asps_method
  * but you may choose to initialize with other values if necessary */; 
 typedef struct nuphase_hk_settings
 {
-  int master_temperature_ain; // The analog pin used for the master board temperature sensor
-  int slave_temperature_ain; // The analog pin used for the slave board temperature sensor
-  int master_fpga_power_gpio;   //the gpio pin controlling the power for the master fpga (i.e everything but the temp sensor) 
-  int slave_fpga_power_gpio;    //the gpio pin controlling the power for the slave fpga (i.e. everything but the temp sensors) 
-  nuphase_fpga_power_state_t init_state;   // The initial state of the FPGA pins. Default is on (but they'll still be off if they're not enabled on the ASPS-DAQ) 
+  nuphase_gpio_power_state_t init_state;   // The initial state of the GPIO pins. Default is on (but some things will still be off if they're not enabled on the ASPS-DAQ) 
   const char * asps_serial_device;         // The serial device to use to communicate with the ASPS-DAQ via serial ( default: /dev/ttyUSB0 )
   const char * asps_address;               // The hostname or IP address to communicate with the ASPS-DAQ via http (Default asps-daq, which may be set in /etc/hosts to something useful) 
 } nuphase_hk_settings_t; 
@@ -54,7 +50,7 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method);
 /** Set the ASPS power state, using the chosen method. These are all the power switches controlled by the ASPS-DAQ */ 
 int nuphase_set_asps_power_state ( nuphase_asps_power_state_t state, nuphase_asps_method_t method); 
 
-/** Set the FPGA power state. These are controlled by a GPIO. For the FPGA's to be on, the relevant ASPS power state must also be enabled */ 
-int nuphase_set_fpga_power_state ( nuphase_fpga_power_state_t state); 
+/** Set the GPIO power state. For the FPGA's to be on, the relevant ASPS power state must also be enabled */ 
+int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state); 
 
 #endif
