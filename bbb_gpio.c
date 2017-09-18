@@ -23,7 +23,7 @@ const char * gpio_unexport_path = "/sys/class/gpio/unexport";
 
 const char * dirstr[]  = { "in","out"}; 
 
-bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin, int value, bbb_gpio_direction_t dir) 
+bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin) 
 {
   
 
@@ -86,8 +86,6 @@ bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin, int value, bbb_gpio_direction_t di
   pin->value_fd = fd; 
   pin->dir_fd = dir_fd; 
   pin->num = gpio_pin; 
-  bbb_gpio_set(pin,value); 
-  bbb_gpio_set_direction(pin,dir); 
 
   return pin; 
 }
@@ -116,9 +114,19 @@ int bbb_gpio_get(bbb_gpio_pin_t * pin)
 
 int bbb_gpio_set(bbb_gpio_pin_t * pin, int state) 
 {
-  char st= '0' + !!state; 
 
-  if ( write(pin->value_fd, &st, 1) <0)
+  int ret = 0; 
+
+  if (state) 
+  {
+    ret = write(pin->dir_fd, "high", strlen("high")); 
+  }
+  else
+  {
+    ret = write(pin->dir_fd, "low", strlen("low")); 
+  }
+
+  if ( ret <0)
   {
     fprintf(stderr,"Problem writing to pin %d. errno: %d\n", pin->num, errno); 
     return -1; 

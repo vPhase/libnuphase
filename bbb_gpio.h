@@ -26,7 +26,7 @@ typedef enum bbb_gpio_direction
 /** open the given pin GPIO . Will allocate memory and return an opaque pointer if successful, 0 otherwise.
  * You can set the state and direction here too. The state is set before the direction. 
  * */ 
-bbb_gpio_pin_t * bbb_gpio_open(int gpio_pin, int state, bbb_gpio_direction_t dir); 
+bbb_gpio_pin_t * bbb_gpio_open(int gpio_pin); 
 
 
 /** Set the GPIO direction. Returns 0 on success, -1 if something went wrong. Does NOT check to see if it needs
@@ -35,6 +35,7 @@ int bbb_gpio_set_direction(bbb_gpio_pin_t * pin, bbb_gpio_direction_t dir);
 
 
 /** Sets the pin value to the given state. returns 0 on success, -1 if something went wrong.. 
+ * ALSO SETS DIRECTION TO OUT 
  */
 int bbb_gpio_set(bbb_gpio_pin_t * pin, int state); 
 
