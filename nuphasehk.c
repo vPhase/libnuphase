@@ -316,7 +316,7 @@ static int serial_update(nuphase_hk_t * hk)
 
     if ( data.magic_start != 0xe110 || data.magic_end != 0xef0f) 
     {
-      fprintf(stderr,"Didn't get right magic bytes. Will try again.\n"); 
+      fprintf(stderr,"Didn't get right magic bytes. Got: %x %x Will try again.\n", data.magic_start, data.magic_end); 
     }
     else
     {
