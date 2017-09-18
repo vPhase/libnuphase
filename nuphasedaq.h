@@ -29,8 +29,7 @@ struct nuphase_dev;
 /** typedef for device */ 
 typedef struct nuphase_dev nuphase_dev_t; 
 
-/** a bitmask indicating which buffers are available */ 
-typedef uint8_t nuphase_buffer_mask_t;
+typedef uint8_t nuphase_buffer_mask_t; 
 
 typedef enum nuphase_trigger_enable
 {
@@ -41,32 +40,21 @@ typedef enum nuphase_trigger_enable
   NP_TRIGGER_BEAM4b       = 16, 
 } nuphase_trigger_enable_t; 
 
+typedef struct nuphase_trigger_output_config
+{
+  uint8_t enable : 1; 
+  uint8_t polarity : 1; 
+  uint8_t extin_to_extout : 1; 
+  uint8_t width; 
+} nuphase_trigger_output_config_t ; 
+
+
 
 typedef enum nuphase_which_board
 {
   MASTER = 0, 
   SLAVE = 1
 } nuphase_which_board_t; 
-
-
-/** Configuration options, sent to fpga  with configure. 
- * Only values different from previously sent config will be sent
- * Use nuphase_config_init to fill with default values if you want. 
- */ 
-typedef struct nuphase_config
-{
- uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
- uint16_t trigger_mask;                     //!< Which triggers to use, default is all (0xffffff) 
- uint8_t  attenuation[NP_NUM_CHAN];         //!< per-channel attenuation
- uint8_t  channel_mask;                     //!< Which channels to use, default is all (0xff)
- nuphase_trigger_enable_t trigger_enables;           //!< Which trigger enables to use 
- uint8_t phased_trigger_readout;            //!< 1 to actually store events
- uint8_t trigger_holdoff;                   //!< Trigger holdoff
- uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 128 samples)  (3 bits);  
-} nuphase_config_t; 
-
-/** Fill the config with default options.*/ 
-void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which ); 
 
 
 /** Firmware info retrieved from board */ 
@@ -93,7 +81,7 @@ typedef struct nuphase_fwinfo
 typedef enum nuphase_reset_type 
 {
   NP_RESET_COUNTERS, //!< resets event counter / trig number / trig time only 
-  NP_RESET_ADC,      //!< resets and recalibrates ADC 
+  NP_RESET_CALIBRATE,      //!< recalibrates ADC if necessary  
   NP_RESET_ALMOST_GLOBAL, //!< everything but register settings 
   NP_RESET_GLOBAL    //! everything 
 } nuphase_reset_t; 
@@ -127,8 +115,6 @@ typedef enum nuphase_reset_type
  * @param spi_master_device_name The master SPI device (likely something like /dev/spidev2.0) 
  * @param spi_slave_device_name The slave SPI device (likely something like /dev/spidev1.0) , or 0 for single board mode
  * @param power_gpio_number If positive, the GPIO that controls the board (and should be enabled at start) 
- * @param cfg    If non-zero, this config is used instead of the default initial one.
- * @param cfg_slave    If non-zero, this config is used for the slave instead of the default initial one.
  * @param thread_safe  If non-zero a mutex will be initialized that will control concurrent access 
  *                     to this device from multiple threads.
  *
@@ -138,8 +124,6 @@ typedef enum nuphase_reset_type
 nuphase_dev_t * nuphase_open(const char * spi_master_device_name, 
                              const char * spi_slave_device_name, 
                              int power_gpio_number, 
-                             const nuphase_config_t * cfg,
-                             const nuphase_config_t * cfg_slave,
                              int thread_safe) ; 
 
 /** Deinitialize the phased array device and frees all memory. Do not attempt to use the device after closing. */ 
@@ -164,11 +148,11 @@ void nuphase_set_readout_number_offset(nuphase_dev_t * d, uint64_t offset);
 /** Sends a board reset. The reset type is specified by type. 
  *
  * @param d the board to reset
- * @param c the config to send right after resetting (unlike nuphase_open, this is not initialized to default if null and will result in a crash) . 
  * @param type The type of reset to do. See the documentation for nuphase_reset_t 
+ * After reset, the phased trigger will be disabled and will need to be enabled if desired. 
  * @returns 0 on success
  */
-int nuphase_reset(nuphase_dev_t *d, const nuphase_config_t * c_master, const nuphase_config_t * c_slave, nuphase_reset_t type); 
+int nuphase_reset(nuphase_dev_t *d, nuphase_reset_t type); 
 
 /**Retrieve the board id for the current event. */
 uint8_t nuphase_get_board_id(const nuphase_dev_t * d, nuphase_which_board_t which_board) ; 
@@ -222,13 +206,6 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buf
 
 /** Retrieve the firmware info */
 int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo, nuphase_which_board_t which); 
-
-/** Sends config to the board. The config is stuff like pretrigger threshold, 
- * Note that it's possible this may not take effect on the immediate next buffer. 
- *
- * @param force reconfigure even if matches current value by board (mostly useful internally) 
- * */ 
-int nuphase_configure(nuphase_dev_t *d, const nuphase_config_t * config, int force, nuphase_which_board_t which); 
 
 
 
@@ -335,12 +312,9 @@ void nuphase_cancel_wait(nuphase_dev_t *d) ;
  * @param slave   if 1, read from slave instead of master (or single board) 
  * @return 0 on success
  * 
- * 
  **/ 
 int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t * result, nuphase_which_board_t which); 
 
-
-//TODO: 
 /** Set the spi clock rate in MHz (default 10MHz)*/ 
 int nuphase_set_spi_clock(nuphase_dev_t *d, unsigned clock); 
 
@@ -350,6 +324,73 @@ int nuphase_set_toggle_chipselect(nuphase_dev_t *d, int cs_toggle);
 /** toggle additional delay between transfers (Default 0) */ 
 int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay_usecs); 
 
+
+
+/** Set all the thresholds 
+ * @param trigger_thresholds array of thresholds, should have NP_NUM_BEAMS members
+ * @param dont_set_mask mask of beams not to set (pass 0 to set all). 
+ */
+int nuphase_set_thresholds(nuphase_dev_t* d, const uint32_t *trigger_thresholds, uint16_t dont_set_mask); 
+
+/** Get all the thresholds
+ * @param trigger_thresholds array of thresholds to be filled. Should have NP_NUM_BEAMS members.
+ */
+int nuphase_get_thresholds(nuphase_dev_t* d, uint32_t *trigger_thresolds); 
+
+/** Set the trigger mask. 1 to use all beams */ 
+int nuphase_set_trigger_mask(nuphase_dev_t* d, uint16_t mask); 
+
+/* Get the trigger mask. */ 
+uint16_t nuphase_get_trigger_mask(nuphase_dev_t* d); 
+
+
+/** Set the attenuation for each channel .
+ *  Should have NP_NUM_CHAN members for both master and slave. If 0, not applied for that board. 
+ */ 
+int nuphase_set_attenuation(nuphase_dev_t * d, const uint8_t * attenuation_master, const uint8_t * attenuation_slave); 
+
+/** Get the attenuation for each channel .
+ *  Should have NP_NUM_CHAN members. If 0, not read. 
+ */ 
+int nuphase_get_attenuation(nuphase_dev_t * d, uint8_t * attenuation_master, uint8_t  *attenuation_slave); 
+
+
+/** Sets the channels used to form the trigger.
+ * 8 LSB's for master, then for slave .
+ * */ 
+int nuphase_set_channel_mask(nuphase_dev_t * d, uint16_t channel_mask); 
+
+/** Gets the channels used to form the trigger.
+ * 8 LSB's for master, then for slave .
+ * */ 
+uint16_t nuphase_get_channel_mask(nuphase_dev_t *d); 
+
+/** Set the trigger enables */ 
+int nuphase_set_trigger_enables(nuphase_dev_t *d, nuphase_trigger_enable_t enable, nuphase_which_board_t which); 
+
+/** Get the trigger enables */ 
+nuphase_trigger_enable_t nuphase_get_trigger_enables(nuphase_dev_t *d, nuphase_which_board_t which); 
+
+/** Enable or disable phased array readout. */ 
+int nuphase_phased_trigger_readout(nuphase_dev_t *d, int enable);
+
+/** Set the trigger holdoff (in the appropriate units) */ 
+int nuphase_set_trigger_holdoff(nuphase_dev_t *d, uint16_t holdoff); 
+
+/** Get the trigger holdoff */ 
+uint16_t nuphase_get_trigger_holdoff(nuphase_dev_t *d); 
+
+/** Set the pretrigger (0-7). Does it for both boards*/ 
+int nuphase_set_pretrigger(nuphase_dev_t *d, uint8_t pretrigger); 
+
+/** Get the pretrigger (0-7) (should be the same for both boards).
+ *
+ * This jsut returns the cached value, so it's possible that it was changed from underneath us. 
+ * */ 
+uint8_t nuphase_get_pretrigger(const nuphase_dev_t *d); 
+
+/** Set the external output config */ 
+int nuphase_configure_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_config_t config); 
 
 
 #endif

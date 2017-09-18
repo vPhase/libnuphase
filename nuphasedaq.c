@@ -83,13 +83,14 @@ typedef enum
   REG_CHANNEL            = 0x41, //select channel to read
   REG_MODE               = 0x42, //readout mode
   REG_RAM_ADDR           = 0x45, //ram address
-  REG_READ               = 0x47         , //send data to spi miso 
+  REG_READ               = 0x47, //send data to spi miso 
   REG_PRETRIGGER         = 0x4c, 
   REG_CLEAR              = 0x4d, //clear buffers 
   REG_BUFFER             = 0x4e,
   REG_TRIGGER_MASK       = 0x50, 
   REG_TRIG_HOLDOFF       = 0x51, 
   REG_TRIG_ENABLE        = 0x52, 
+  REG_EXT_TRIG_CONFIG    = 0x53, 
   REG_PHASED_TRIGGER     = 0x54, 
   REG_THRESHOLDS         = 0x56, // add the threshold to this to get the right register
   REG_SET_READ_REG       = 0x6d, 
@@ -123,7 +124,6 @@ struct nuphase_dev
   int enable_locking; 
   uint64_t readout_number_offset; 
   uint64_t event_counter;  // should match device...we'll keep this to complain if it doesn't
-  nuphase_config_t cfg[2]; 
   uint16_t buffer_length; 
   pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
   pthread_mutex_t wait_mut; //mutex for the waiting. Only used if enable_locking is true
@@ -138,6 +138,8 @@ struct nuphase_dev
   int spi_clock; 
   int cs_change; 
   int delay_us; 
+
+  uint8_t pretrigger; 
 
   // store event / header used for calibration here in case we want it later? 
   nuphase_event_t calib_ev;
@@ -235,11 +237,9 @@ static uint8_t buf_sync_on[NP_SPI_BYTES] = {REG_SYNC,0,0,1} ;
 static uint8_t buf_sync_off[NP_SPI_BYTES] = {REG_SYNC,0,0,0} ; 
 static uint8_t buf_reset_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,1}; 
 static uint8_t buf_reset_almost_all[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,2}; 
-static uint8_t buf_reset_adc[NP_SPI_BYTES] = {REG_RESET_ALL,0,0,4}; 
 static uint8_t buf_reset_counter[NP_SPI_BYTES] = {REG_RESET_COUNTER,0,0,1}; 
-static uint8_t buf_clear_all_masks[NP_SPI_BYTES] = {REG_TRIGGER_MASK,0,0,0x0}; 
 static uint8_t buf_adc_clk_rst[NP_SPI_BYTES] = {REG_ADC_CLK_RST,0,0,0}; 
-static uint8_t buf_apply_attenuator[NP_SPI_BYTES] = {REG_ATTEN_APPLY,0,0,0}; 
+static uint8_t buf_apply_attenuation[NP_SPI_BYTES] = {REG_ATTEN_APPLY,0,0,0}; 
 
 static void fillBuffers() __attribute__((constructor)); //this will fill them
 
@@ -615,12 +615,12 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state)
 
 static int board_id_counter =1; 
 
-nuphase_dev_t * nuphase_open(const char * devicename_master, const char * devicename_slave, int gpio_number, 
-                             const nuphase_config_t * c, const nuphase_config_t * c_slave, int locking)
+nuphase_dev_t * nuphase_open(const char * devicename_master,
+                             const char * devicename_slave,
+                             int gpio_number, int locking)
 {
   int locked,fd[2]; 
   nuphase_dev_t * dev; 
-
 
   fd[0] = open(devicename_master, O_RDWR); 
   if (fd[0] < 0) 
@@ -707,15 +707,6 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
       ioctl(dev->fd[ifd], SPI_IOC_WR_MAX_SPEED_HZ, &dev->spi_clock); 
   }
 
-
-  //configuration 
-  if (c) dev->cfg[0] = *c; 
-  else nuphase_config_init(&dev->cfg[0],MASTER); 
-
-  if (c_slave) dev->cfg[1] = *c_slave; 
-  else if (fd[1]) nuphase_config_init(&dev->cfg[1],SLAVE); 
-
-
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->readout_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
@@ -754,7 +745,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
  }
 
 
-  if (nuphase_reset(dev, &dev->cfg[0], &dev->cfg[1], NP_RESET_COUNTERS)) 
+  if (nuphase_reset(dev, NP_RESET_COUNTERS)) 
   {
     fprintf(stderr,"Unable to reset device... "); 
     nuphase_close(dev); 
@@ -956,190 +947,278 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
   return mask; 
 }
 
-/* This just sets defaults */ 
-void nuphase_config_init(nuphase_config_t * c, nuphase_which_board_t which) 
+
+int nuphase_set_pretrigger(nuphase_dev_t * d, uint8_t pretrigger)
 {
-  int i;
-  c->channel_mask = which == MASTER?  0xff : 0xf ; 
-  c->pretrigger = 4; //?? 
-  c->trigger_mask = 0x7fff; 
-
-  for (i = 0; i < NP_NUM_BEAMS; i++)
-  {
-    c->trigger_thresholds[i] = 0xfffff;  //
-  }
-
-  for (i = 0; i < NP_NUM_CHAN; i++)
-  {
-    c->attenuation[i] = 0;  //TODO make this more sensible by default 
-  }
-
-  c->trigger_enables = which == MASTER?  0x1f : 0x1e; 
-  c->phased_trigger_readout = 1; 
-
-}
-
-
-int nuphase_configure(nuphase_dev_t * d, const nuphase_config_t *c, int force, nuphase_which_board_t w) 
-{
-  int written; 
-  int ret = 0; 
-  
-  USING(d); 
-  if (force || c->pretrigger != d->cfg[w].pretrigger)
-  {
-    uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, 0, c->pretrigger}; 
-    written = do_write(d->fd[w], pretrigger_buf); 
-    if (written == NP_SPI_BYTES) 
-    {
-      d->cfg[w].pretrigger = c->pretrigger; 
-    }
-    else
-    {
-      ret = -1; //don't try to continue if we fail . 
-      goto configure_end; 
-    }
-  }
-
-  if (force || c->channel_mask!= d->cfg[w].channel_mask)
-  {
-    uint8_t channel_mask_buf[]= { REG_CHANNEL_MASK, 0, 0, c->channel_mask}; 
-    written = do_write(d->fd[w], channel_mask_buf); 
-    if (written == NP_SPI_BYTES) 
-    {
-      d->cfg[w].channel_mask = c->channel_mask; 
-    }
-    else
-    {
-      ret = -1; 
-      goto configure_end; 
-    }
-  }
-
-  if (force || c->trigger_mask != d->cfg[w].trigger_mask)
-  {
-    //TODO check the byte order
-    uint8_t trigger_mask_buf[]= { REG_TRIGGER_MASK, 0, (c->trigger_mask >> 8) & 0xff, c->trigger_mask & 0xff}; 
-    written = do_write(d->fd[w], trigger_mask_buf); 
-    if (written == NP_SPI_BYTES) 
-    {
-      d->cfg[w].trigger_mask = c->trigger_mask; 
-    }
-    else
-    {
-      ret = -1; 
-      goto configure_end; 
-    }
-  }
-
-  if (force || memcmp(c->trigger_thresholds, d->cfg[w].trigger_thresholds, sizeof(c->trigger_thresholds)))
-  {
-    uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
-    int i; 
-    for (i = 0; i < NP_NUM_BEAMS; i++)
-    {
-      thresholds_buf[i][0]= REG_THRESHOLDS+i ;
-      thresholds_buf[i][1]= (c->trigger_thresholds[i] >> 16 ) & 0xf;
-      thresholds_buf[i][2]= ( c->trigger_thresholds[i] >> 8) & 0xff; 
-      thresholds_buf[i][3]= c->trigger_thresholds[i] & 0xff;
-      ret += buffer_append (d,w,thresholds_buf[i],0); 
-    }
-    
-    ret += buffer_send(d,w); 
-
-    if(!ret)
-    {
-      //success! 
-      memmove(d->cfg[w].trigger_thresholds, c->trigger_thresholds, sizeof(c->trigger_thresholds)); 
-    }
-    else 
-    {
-      ret =-1; 
-      goto configure_end; 
-    }
-  }
-
-  if (force || memcmp(c->attenuation, d->cfg[w].attenuation, sizeof(c->attenuation)))
-  {
-
-    uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, c->attenuation[2], c->attenuation[1], c->attenuation[0] }; //TODO check order 
-    uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, c->attenuation[5], c->attenuation[4], c->attenuation[3] }; //TODO check order 
-    uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, c->attenuation[7], c->attenuation[6] }; //TODO check order 
-
-
-    ret += buffer_append(d,w, attenuation_012,0); 
-    ret += buffer_append(d,w, attenuation_345,0); 
-    ret += buffer_append(d,w, attenuation_067,0); 
-    ret += buffer_append(d,w, buf_apply_attenuator,0); 
-
-    ret += buffer_send(d,w); 
-    if (!ret)
-    {
-      //success! 
-      memmove(d->cfg[w].attenuation, c->attenuation, sizeof(c->attenuation)); 
-    }
-    else
-    {
-      ret = -1; 
-      goto configure_end; 
-    }
-
-  }
-
-  if (force || c->trigger_enables!= d->cfg[w].trigger_enables)
-  {
-    uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, 0, c->trigger_enables}; 
-
-    written = do_write(d->fd[w], trigger_enable_buf); 
-    if (written == NP_SPI_BYTES) 
-    {
-      d->cfg[w].trigger_enables = c->trigger_enables; 
-    }
-    else
-    {
-      ret = -1; //don't try to continue if we fail . 
-      goto configure_end; 
-    }
-  }
-
-  if (force || c->phased_trigger_readout!= d->cfg[w].phased_trigger_readout)
-  {
-    uint8_t trigger_buf[NP_SPI_BYTES] = {REG_PHASED_TRIGGER, 0, 0, c->phased_trigger_readout}; 
-
-    written = do_write(d->fd[w], trigger_buf); 
-    if (written == NP_SPI_BYTES) 
-    {
-      d->cfg[w].phased_trigger_readout = c->phased_trigger_readout; 
-    }
-    else
-    {
-      ret = -1; //don't try to continue if we fail . 
-      goto configure_end; 
-    }
-  }
-
- 
-  if (force || c->trigger_holdoff != d->cfg[w].trigger_holdoff)
-  {
-    uint8_t trigger_holdoff_buf[NP_SPI_BYTES] = {REG_TRIG_HOLDOFF, 0, 0, c->trigger_holdoff}; 
-
-    written = do_write(d->fd[w], trigger_holdoff_buf); 
-    if (written == NP_SPI_BYTES) 
-    {
-      d->cfg[w].trigger_holdoff = c->trigger_holdoff; 
-    }
-    else
-    {
-      ret = -1; //don't try to continue if we fail . 
-      goto configure_end; 
-    }
-
-  }
-  configure_end: 
-
-  DONE(d); 
+  uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, 0, pretrigger & 0x7}; 
+  int ret = synchronized_command(d, pretrigger_buf,0,0,0); 
+  if (!ret) d->pretrigger = pretrigger; 
   return ret; 
 }
+
+uint8_t nuphase_get_pretrigger(const nuphase_dev_t * d)
+{
+  return d->pretrigger; 
+}
+
+
+
+int nuphase_set_channel_mask(nuphase_dev_t * d, uint16_t mask) 
+
+{
+    uint8_t channel_mask_buf_master[NP_SPI_BYTES]= { REG_CHANNEL_MASK, 0, 0, mask & 0xff}; 
+
+    USING(d); 
+    int written = do_write(d->fd[MASTER], channel_mask_buf_master); 
+    if (written!= NP_SPI_BYTES)
+    {
+      DONE(d); 
+      return -1; 
+    }
+
+    if (d->fd[SLAVE]) 
+    {
+      uint8_t channel_mask_buf_slave[NP_SPI_BYTES]=  { REG_CHANNEL_MASK, 0, 0, (mask >> 8) & 0xff}; 
+      written = do_write(d->fd[SLAVE], channel_mask_buf_slave); 
+      if (written!= NP_SPI_BYTES) 
+      {
+        DONE(d); 
+        return -1; 
+      }
+    }
+
+    DONE(d); 
+    return 0; 
+}
+
+uint16_t nuphase_get_channel_mask(nuphase_dev_t* d) 
+{
+  uint16_t mask = 0; 
+  uint8_t buf_master[NP_SPI_BYTES], buf_slave[NP_SPI_BYTES]; 
+
+  nuphase_read_register(d, REG_CHANNEL_MASK, buf_master, MASTER); 
+  mask = buf_master[3]; 
+
+  if (d->fd[SLAVE]) 
+  {
+    nuphase_read_register(d, REG_CHANNEL_MASK, buf_slave, SLAVE); 
+    mask = mask |  ( buf_slave[3] << 8); 
+  }
+
+  return mask; 
+}
+
+
+int nuphase_set_trigger_mask(nuphase_dev_t * d, uint16_t mask)
+{
+  uint8_t trigger_mask_buf[]= { REG_TRIGGER_MASK, 0, (mask >> 8) & 0xff, mask & 0xff}; 
+  USING(d); 
+  int written = do_write(d->fd[MASTER], trigger_mask_buf); 
+  DONE(d); 
+  return written !=4; 
+}
+
+
+uint16_t nuphase_get_trigger_mask(nuphase_dev_t *d) 
+{
+  uint8_t buf[NP_SPI_BYTES]; 
+  uint16_t mask; 
+  nuphase_read_register(d, REG_TRIGGER_MASK, buf, MASTER); 
+  mask = buf[3]; 
+  mask = mask | (buf[2] << 8); 
+  return mask; 
+}
+
+
+int nuphase_set_thresholds(nuphase_dev_t *d, const uint32_t * trigger_thresholds, uint16_t dont) 
+{
+  uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+  USING(d); 
+  int i; 
+  int ret = 0; 
+  for (i = 0; i < NP_NUM_BEAMS; i++)
+  {
+    if (dont & (i << i)) continue; 
+    thresholds_buf[i][0]= REG_THRESHOLDS+i ;
+    thresholds_buf[i][1]= (trigger_thresholds[i] >> 16 ) & 0xf;
+    thresholds_buf[i][2]= (trigger_thresholds[i] >> 8) & 0xff; 
+    thresholds_buf[i][3]= trigger_thresholds[i] & 0xff;
+    ret += buffer_append (d,MASTER,thresholds_buf[i],0); 
+  }
+    
+  ret += buffer_send(d,MASTER); 
+  DONE(d); 
+
+  return ret; 
+}
+
+int nuphase_get_thresholds(nuphase_dev_t *d, uint32_t * thresholds) 
+{
+  uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
+  USING(d); 
+  int i; 
+  int ret = 0; 
+  for (i = 0; i < NP_NUM_BEAMS; i++)
+  {
+    ret+= append_read_register(d, MASTER, REG_THRESHOLDS+i, thresholds_buf[i]); 
+  }
+  ret += buffer_send(d,MASTER); 
+  DONE(d); 
+
+  if (!ret) 
+  {
+    memset(thresholds, 0,NP_NUM_BEAMS * sizeof(*thresholds)); 
+  }
+  else
+  {
+    for (i = 0; i < NP_NUM_BEAMS; i++)
+    {
+      thresholds[i] = thresholds_buf[i][3] & 0xff; 
+      thresholds[i] = thresholds[i] |  ( ( thresholds_buf[i][2] << 8) & 0xff); 
+      thresholds[i] = thresholds[i] |  ( ( thresholds_buf[i][3] << 16) & 0xf); 
+    }
+  }
+
+  return ret; 
+}
+
+
+
+int nuphase_set_attenuation(nuphase_dev_t * d, const uint8_t * attenuation_master, const uint8_t * attenuation_slave)
+{
+  int ret = 0; 
+  if (attenuation_master)
+  {
+    uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, attenuation_master[2], attenuation_master[1], attenuation_master[0] }; 
+    uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, attenuation_master[5], attenuation_master[4], attenuation_master[3] };
+    uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, attenuation_master[7], attenuation_master[6] }; 
+
+    USING(d); 
+    ret += buffer_append(d,MASTER, attenuation_012,0); 
+    ret += buffer_append(d,MASTER, attenuation_345,0); 
+    ret += buffer_append(d,MASTER, attenuation_067,0); 
+    ret += buffer_send(d,MASTER); 
+    DONE(d); 
+  }
+
+  if (attenuation_slave && d->fd[SLAVE])
+  {
+    uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, attenuation_slave[2], attenuation_slave[1], attenuation_slave[0] }; 
+    uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, attenuation_slave[5], attenuation_slave[4], attenuation_slave[3] };
+    uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, attenuation_slave[7], attenuation_slave[6] }; 
+
+    USING(d); 
+    ret += buffer_append(d,SLAVE, attenuation_012,0); 
+    ret += buffer_append(d,SLAVE, attenuation_345,0); 
+    ret += buffer_append(d,SLAVE, attenuation_067,0); 
+    ret += buffer_send(d,SLAVE); 
+    DONE(d); 
+  }
+
+  USING(d); 
+  ret += synchronized_command(d, buf_apply_attenuation, 0,0,0); 
+  DONE(d); 
+
+  return ret; 
+}
+
+int nuphase_get_attenuation(nuphase_dev_t * d, uint8_t * attenuation_master, uint8_t * attenuation_slave)
+{
+  int ret = 0; 
+  uint8_t attenuation_012[NP_SPI_BYTES];
+  uint8_t attenuation_345[NP_SPI_BYTES];
+  uint8_t attenuation_067[NP_SPI_BYTES];
+
+
+  if (attenuation_master) 
+  {
+    USING(d); 
+    ret += append_read_register(d,MASTER,REG_ATTEN_012, attenuation_012); 
+    ret += append_read_register(d,MASTER,REG_ATTEN_345, attenuation_345); 
+    ret += append_read_register(d,MASTER,REG_ATTEN_67 , attenuation_067); 
+    ret += buffer_send(d,MASTER); 
+    DONE(d)
+
+    if (!ret) 
+    {
+      attenuation_master[0] =  attenuation_012[3]; 
+      attenuation_master[1] =  attenuation_012[2]; 
+      attenuation_master[2] =  attenuation_012[1]; 
+      attenuation_master[3] =  attenuation_345[3]; 
+      attenuation_master[4] =  attenuation_345[2]; 
+      attenuation_master[5] =  attenuation_345[1]; 
+      attenuation_master[6] =  attenuation_067[3]; 
+      attenuation_master[7] =  attenuation_067[2]; 
+    }
+  }
+
+  if (!ret && attenuation_slave && d->fd[SLAVE])
+  {
+    USING(d); 
+    ret += append_read_register(d,MASTER,REG_ATTEN_012, attenuation_012); 
+    ret += append_read_register(d,MASTER,REG_ATTEN_345, attenuation_345); 
+    ret += append_read_register(d,MASTER,REG_ATTEN_67 , attenuation_067); 
+    ret += buffer_send(d,MASTER); 
+    DONE(d)
+
+    if (!ret) 
+    {
+      attenuation_slave[0] =  attenuation_012[3]; 
+      attenuation_slave[1] =  attenuation_012[2]; 
+      attenuation_slave[2] =  attenuation_012[1]; 
+      attenuation_slave[3] =  attenuation_345[3]; 
+      attenuation_slave[4] =  attenuation_345[2]; 
+      attenuation_slave[5] =  attenuation_345[1]; 
+      attenuation_slave[6] =  attenuation_067[3]; 
+      attenuation_slave[7] =  attenuation_067[2]; 
+    }
+
+
+  }
+
+  return ret; 
+}
+
+
+int nuphase_set_trigger_enables(nuphase_dev_t * d, nuphase_trigger_enable_t enables, nuphase_which_board_t w) 
+{
+  uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, 0, enables}; 
+
+  USING(d); 
+  int written = do_write(d->fd[w], trigger_enable_buf); 
+  DONE(d); 
+  return written != NP_SPI_BYTES ; 
+}
+
+nuphase_trigger_enable_t nuphase_get_trigger_enables(nuphase_dev_t * d, nuphase_which_board_t w) 
+{
+  uint8_t trigger_enable_buf[NP_SPI_BYTES]; 
+  nuphase_read_register(d,REG_TRIG_ENABLE, trigger_enable_buf, w); 
+  return trigger_enable_buf[3]; 
+}
+
+int nuphase_phased_trigger_readout(nuphase_dev_t * d, int phased) 
+{
+    uint8_t trigger_buf[NP_SPI_BYTES] = {REG_PHASED_TRIGGER, 0, 0, phased & 1}; 
+    return synchronized_command(d, trigger_buf, 0,0,0); 
+}
+
+int set_trigger_holdoff(nuphase_dev_t * d, uint16_t trigger_holdoff)
+{
+  uint8_t trigger_holdoff_buf[NP_SPI_BYTES] = {REG_TRIG_HOLDOFF, 0, (trigger_holdoff >> 8) & 0xf, trigger_holdoff &0xff}; 
+  USING(d); 
+  int written = do_write(d->fd[MASTER], trigger_holdoff_buf); 
+  DONE(d); 
+  return (written != NP_SPI_BYTES) ;
+}
+
+uint16_t nuphase_get_trigger_holdoff(nuphase_dev_t *d) 
+{
+  uint8_t trigger_holdoff_buf[NP_SPI_BYTES]; 
+  nuphase_read_register(d, REG_TRIG_HOLDOFF, trigger_holdoff_buf, MASTER); 
+  return trigger_holdoff_buf[3] |  ( trigger_holdoff_buf[2] << 8); 
+}
+
 
 
 
@@ -1326,7 +1405,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         hd[iout]->event_number = d->readout_number_offset + big_event_counter; 
         hd[iout]->trig_number = trig_counter[0] + (trig_counter[1] << 24); 
         hd[iout]->buffer_length = d->buffer_length; 
-        hd[iout]->pretrigger_samples = d->cfg[ibd].pretrigger* 8 * 16; //TODO define these constants somewhere
+        hd[iout]->pretrigger_samples = d->pretrigger* 8 * 16; //TODO define these constants somewhere
         hd[iout]->approx_trigger_time= d->start_time.tv_sec + hd[iout]->trig_time[ibd] / BOARD_CLOCK_HZ; 
         hd[iout]->approx_trigger_time_nsecs = d->start_time.tv_nsec + (hd[iout]->trig_time[ibd] % BOARD_CLOCK_HZ) *(1.e9 / BOARD_CLOCK_HZ); 
         if (hd[iout]->approx_trigger_time_nsecs > 1e9) 
@@ -1363,7 +1442,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
         if (hd[iout]->trig_number != trig_counter[0] + (trig_counter[1] << 24))
         {
-          fprintf(stderr,"trig number mismatch between master and slave %llu vs %llu!\n", hd[iout]->trig_number, (uint64_t) trig_counter[0] + (trig_counter[1] <<24)); 
+          fprintf(stderr,"trig number mismatch between master and slave %"PRIu64" vs %"PRIu64"!\n", hd[iout]->trig_number, (uint64_t) trig_counter[0] + (trig_counter[1] <<24)); 
           hd[iout]->sync_problem |= 2; 
         }
 
@@ -1559,8 +1638,7 @@ static struct timespec avg_time(struct timespec A, struct timespec B)
  *
  *
  */
-int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
-                 const nuphase_config_t * cslave,  nuphase_reset_t reset_type)
+int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
 {
   
 //  const nuphase_config_t * cfgs[NP_MAX_BOARDS]; 
@@ -1583,6 +1661,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
  
     fprintf(stderr,"Full reset...\n"); 
     //we need to sleep for a while. how about 20 seconds? 
+    //TODO add check on register 8 
     sleep(20); 
     fprintf(stderr,"...done\n"); 
   }
@@ -1604,22 +1683,13 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
     fprintf(stderr,"...done\n"); 
   }
 
-  if (reset_type == NP_RESET_ADC)
-  {
-    if (synchronized_command(d,buf_reset_adc,0,0,0))
-    {
-        return 1;
-    }
-    sleep(5); // ? 
-  }
-
-  /* afer all resets (if applicable), we want to restart the event counter 
+  /* after all resets (if applicable), we want to restart the event counter 
    * and, if any of the stronger resets were applied, apply the calibration. 
    *
    * The order of operations is: 
    *
-   *  - turn off all trigger masks
-   *  - clear allthe buffers 
+   *  - turn off the phased trigger
+   *  - clear all the buffers 
    *  - if necessary, do the calibration 
    *  - reset the event / trig time counters (and save the time to try to match it up later) 
    *  - call nuphase_configure with the passed config. 
@@ -1627,18 +1697,12 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
    
    **/
 
-  //start by clearing the masks 
-  for (ibd = 0; ibd < NBD(d); ibd++)
+
+  if (! nuphase_phased_trigger_readout(d,0)) 
   {
-    wrote = do_write( d->fd[ibd], buf_clear_all_masks);
-
-    if (wrote != NP_SPI_BYTES) 
-    {
-        fprintf(stderr, "Unable to clear masks. Aborting reset\n"); 
+        fprintf(stderr, "Unable to turn off readout. Aborting reset\n"); 
         return 1; 
-    }
   }
-
 
   for (ibd = 0; ibd < NBD(d); ibd++)
   {
@@ -1670,7 +1734,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
    *
    *   disable the cal pulser
    */
-  if (reset_type >= NP_RESET_ADC)//temporary disable 
+  if (reset_type >= NP_RESET_CALIBRATE) 
   {
     int happy = 0; 
     int misery = 0; 
@@ -1679,6 +1743,10 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
     //temporarily set the buffer length to the maximum 
     uint16_t old_buf_length = d->buffer_length; 
     d->buffer_length = 1024; 
+
+    //we need to turn off the phased trigger to not overwhelm ARA 
+    nuphase_trigger_enable_t old_enables = nuphase_get_trigger_enables(d, MASTER); 
+    nuphase_set_trigger_enables(d, old_enables & (~NP_TRIGGER_BEAMFORMING), MASTER); 
 
     //release the calpulser 
     nuphase_calpulse(d, 3); 
@@ -1826,6 +1894,7 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
       do_write(d->fd[ibd], buf_clear[0xf]); 
     }
 
+    nuphase_set_trigger_enables(d, old_enables, MASTER); 
     if (!happy) return -1; 
   }
 
@@ -1865,16 +1934,6 @@ int nuphase_reset(nuphase_dev_t * d,const  nuphase_config_t * c,
 
    int ret  = 0; 
 
-   nuphase_calpulse(d, 2); 
-
-   if (NBD(d) > 1)
-   {
-     ret += nuphase_configure(d,cslave,1,SLAVE); 
-
-   }
-   ret += nuphase_configure(d,c,1,MASTER); 
-
-   nuphase_calpulse(d, 0); 
    return ret ; 
 }
 
@@ -1906,4 +1965,20 @@ int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay)
   setup_xfers(d); 
   return 0; 
 }
+
+
+int nuphase_configure_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_config_t config) 
+{
+  uint8_t cfg_buf[NP_SPI_BYTES] = { REG_EXT_TRIG_CONFIG,0, config.width,
+                                    (config.enable & 1 ) | ((config.polarity & 1) <<1) 
+                                     | ((config.extin_to_extout & 1) << 2) 
+                                  }; 
+
+  USING(d); 
+  int written = do_write(d->fd[MASTER], cfg_buf); 
+  DONE(d); 
+  return written != NP_SPI_BYTES; 
+}
+
+
 
