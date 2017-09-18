@@ -48,7 +48,7 @@ int main(int nargs, char ** args )
   buf1 = malloc(size); 
 
   signal(SIGINT, catch_interrupt); 
-  dev =  nuphase_open(args[1],0,60,0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],0,60,0); //no interrupt for now and no threadlocking
 
 
   int i = 0; 

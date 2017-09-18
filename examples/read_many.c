@@ -50,7 +50,10 @@ int main(int nargs, char ** args )
 
 
   signal(SIGINT, catch_interrupt); 
-  dev =  nuphase_open(args[1],args[2],0,0,0,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open(args[1],args[2],0,0); //no interrupt for now and no threadlocking
+  
+  //enable phased readout 
+  nuphase_phased_trigger_readout(dev,1); 
 
   nuphase_set_readout_number_offset(dev,0); 
 //  nuphase_set_buffer_length(dev,127*16); 

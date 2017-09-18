@@ -18,15 +18,9 @@ int main(int nargs, char ** args)
 
 
   //no interrupt, no locking, default config, 
-  dev = nuphase_open(args[1],nargs > 2 ? args[2] : 0,0,0,0,0); 
-  nuphase_config_t cfg; 
-  nuphase_config_t cfg_slave; 
-  nuphase_config_init(&cfg,MASTER); 
-  nuphase_config_init(&cfg_slave,SLAVE); 
-  nuphase_reset(dev,&cfg,nargs > 2 ? &cfg_slave : 0 ,NP_RESET_ADC); 
+  dev = nuphase_open(args[1],nargs > 2 ? args[2] : 0,0,0); 
+  nuphase_reset(dev,NP_RESET_CALIBRATE); 
   nuphase_close(dev); 
-
-
 
   return 0; 
 

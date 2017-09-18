@@ -10,32 +10,6 @@
 // attenuation_scan prefix [n=100] [steps=16] [calpulse=0] 
 
 
-#ifdef __arm__ 
-
-uint8_t reverse_bits(uint8_t in) 
-{
-  uint32_t input = in;
-  uint32_t output;
-  __asm__("rbit %0, %1\n" : "=r"(output) : "r"(input));
-  return output >> 24;
-}
-#else
-uint8_t reverse_bits(uint8_t in) 
-{
-  uint8_t out = 0; 
-  int i; 
-  for (i = 0; i < 8; i++) 
-  {
-    if (in & (1 << i))
-    {
-      out = out | ( 1 << (7-i)); 
-    }
-  }
-
-  return out; 
-}
-#endif
-
 
 volatile static int stop = 0; 
 
@@ -85,16 +59,12 @@ int main(int nargs, char ** args )
 
 
   signal(SIGINT, catch_interrupt); 
-  nuphase_config_t  cmaster; 
-  nuphase_config_t  cslave; 
-  nuphase_config_init(&cmaster, MASTER); 
-  nuphase_config_init(&cslave, SLAVE); 
 
-  cmaster.phased_trigger_readout=0; 
-
-  dev =  nuphase_open("/dev/spidev2.0","/dev/spidev1.0",0,&cmaster,&cslave,0); //no interrupt for now and no threadlocking
+  dev =  nuphase_open("/dev/spidev2.0","/dev/spidev1.0",0,0); //no interrupt for now and no threadlocking
   nuphase_calpulse(dev,calpulse); 
 
+  uint8_t master_attenuation[NP_NUM_CHAN]; 
+  uint8_t slave_attenuation[NP_NUM_CHAN]; 
   for (step = 0; step < steps; step++) 
   {
     if (stop) break; 
@@ -115,13 +85,11 @@ int main(int nargs, char ** args )
 
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++) 
     {
-      uint8_t reversed = reverse_bits(attenuation); 
-      cmaster.attenuation[ichan] = reversed; 
-      cslave.attenuation[ichan] = reversed; 
+      master_attenuation[ichan] = attenuation; 
+      slave_attenuation[ichan] = attenuation; 
     }
 
-    nuphase_configure(dev, &cmaster, 0, MASTER); 
-    nuphase_configure(dev, &cslave, 0, SLAVE); 
+    nuphase_set_attenuation(dev, master_attenuation, slave_attenuation); 
     nevents = 0;
 
     while (nevents < n) 

@@ -34,7 +34,7 @@ int main(int nargs, char ** args )
     reg = atoi(args[2]); 
 
 
-  nuphase_dev_t * dev =  nuphase_open(args[1],0,60,0,0,0); //no interrupt for now and no threadlocking
+  nuphase_dev_t * dev =  nuphase_open(args[1],0,60,0); //no interrupt for now and no threadlocking
 
   signal(SIGINT, catch_interrupt); 
   int ibuf = 0; 
