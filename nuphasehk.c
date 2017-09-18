@@ -312,6 +312,9 @@ static int serial_update(nuphase_hk_t * hk)
   {
     tcflush(serial_fd, TCIOFLUSH); 
     write(serial_fd,query_string, sizeof(query_string)-1); 
+    //looks like CmdArduino echoes everything 
+    char garbage[sizeof(query_string)]; 
+    read(serial_fd, garbage, sizeof(query_string)); 
     read(serial_fd, &data, sizeof(data)); 
 
     if ( data.magic_start != 0xe110 || data.magic_end != 0xef0f) 
