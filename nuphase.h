@@ -118,12 +118,6 @@ typedef struct nuphase_event
 } nuphase_event_t; 
 
 
-/** nuphase status. 
- * Holds scalers, deadtime, and maybe some other things 
- **/
-
-
-
 
 typedef enum nuphase_scaler_type
 {
@@ -133,6 +127,9 @@ typedef enum nuphase_scaler_type
 } nuphase_scaler_type_t; 
 
 
+/** nuphase status. 
+ * Holds scalers, deadtime, and maybe some other things 
+ **/
 typedef struct nuphase_status
 {
   uint16_t global_scalers[NP_NUM_SCALERS];
@@ -140,6 +137,7 @@ typedef struct nuphase_status
   uint32_t deadtime;               //!< The deadtime fraction (units tbd) 
   uint32_t readout_time;           //!< CPU time of readout, seconds
   uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
+  uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
   uint8_t board_id;               //!< The board number assigned at startup. 
 
 } nuphase_status_t; 
@@ -156,12 +154,20 @@ typedef enum nuphase_asps_power_state
 
 } nuphase_asps_power_state_t; 
 
+
+#define ASPS_ALL 0x1f
+
 /* Power state of FPGA (the board can be on but the FPGA off) */ 
-typedef enum nuphase_fpga_power_state
+typedef enum nuphase_gpio_power_state
 {
   NP_FPGA_POWER_MASTER = 1, 
-  NP_FPGA_POWER_SLAVE = 2 
-} nuphase_fpga_power_state_t; 
+  NP_FPGA_POWER_SLAVE = 2,
+  NP_SPI_ENABLE = 4,
+  NP_DOWNHOLE_POWER= 8
+
+} nuphase_gpio_power_state_t; 
+
+#define GPIO_ALL 0xf
 
 
 typedef struct nuphase_hk
@@ -179,7 +185,7 @@ typedef struct nuphase_hk
   uint16_t current_switch; 
   nuphase_asps_power_state_t on_state : 8; 
   nuphase_asps_power_state_t fault_state : 8; 
-  nuphase_fpga_power_state_t fpga_state : 8; 
+  nuphase_gpio_power_state_t gpio_state : 8; 
   uint32_t disk_space_kB; 
   uint32_t free_mem_kB;  
 } nuphase_hk_t; 
