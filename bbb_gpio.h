@@ -23,8 +23,10 @@ typedef enum bbb_gpio_direction
 
 
 
-/** open the given pin GPIO . Will allocate memory and return an opaque pointer if successful, 0 otherwise.*/ 
-bbb_gpio_pin_t * bbb_gpio_open(int gpio_pin, bbb_gpio_direction_t dir); 
+/** open the given pin GPIO . Will allocate memory and return an opaque pointer if successful, 0 otherwise.
+ * You can set the state and direction here too. The state is set before the direction. 
+ * */ 
+bbb_gpio_pin_t * bbb_gpio_open(int gpio_pin, int state, bbb_gpio_direction_t dir); 
 
 
 /** Set the GPIO direction. Returns 0 on success, -1 if something went wrong. Does NOT check to see if it needs
@@ -39,15 +41,14 @@ int bbb_gpio_set(bbb_gpio_pin_t * pin, int state);
 /** Gets the bin value (0 or 1). Returns -1 if something went wrong.  */ 
 int bbb_gpio_get(bbb_gpio_pin_t * pin); 
 
-/** Close the gpio pin. Return 0 on success */ 
-int bbb_gpio_close(bbb_gpio_pin_t * pin); 
+/** Close the gpio pin. If unexport is true, it will become unexported (and I guess revert to an input). Return 0 on success */ 
+int bbb_gpio_close(bbb_gpio_pin_t * pin, int unexport); 
 
 /** returns the GPIO pin number associated with this pin */ 
-int bbb_gpio_pin_number(const bbb_gpio_pin_t * pin); 
+int bbb_gpio_get_pin_number(const bbb_gpio_pin_t * pin); 
 
-/** Gets the direction. Could be wrong if it's been changed from underneath us
- *  by some process that doesn't care that we're already using it */ 
-bbb_gpio_direction_t bbb_gpio_dir(const bbb_gpio_pin_t * pin); 
+/** Gets the direction. */ 
+bbb_gpio_direction_t bbb_gpio_get_direction(bbb_gpio_pin_t * pin); 
 
 
 #endif

@@ -18,16 +18,32 @@
 #include <fcntl.h> 
 
 
+
+
 //---------------------------------------------
-//   device handles for the FPGA pins 
+//   device handles for the GPIO pins 
 //---------------------------------------------
 static bbb_gpio_pin_t * master_fpga_ctl = 0; 
 static bbb_gpio_pin_t * slave_fpga_ctl = 0; 
+static bbb_gpio_pin_t * comm_ctl = 0; 
+static bbb_gpio_pin_t * downhole_power_ctl = 0; 
+
+
+static nuphase_gpio_power_state_t current_state = 0; 
+
 
 //---------------------------------------------
 // Global HK settings 
 //---------------------------------------------
 static nuphase_hk_settings_t cfg; 
+
+#define MASTER_TEMP_AIN 0
+#define SLAVE_TEMP_AIN  2
+#define MASTER_POWER_GPIO 46
+#define SLAVE_POWER_GPIO 47
+#define COMM_GPIO 60
+#define DOWNHOLE_GPIO 66
+
 
 
 //---------------------------------------------------
@@ -53,14 +69,24 @@ int nuphase_hk_init(const nuphase_hk_settings_t * settings)
     nuphase_hk_settings_init(&cfg); 
   }
 
- //take control of the gpio's 
-//  master_fpga_ctl  = bbio_gpio_open( cfg.master_fpga_power_gpio, BBB_IN); // should I turn it on or off... ? Leave it as input for now 
-//  bbb_gpio_set_value ( master_fpga_ctl, 0);  //prepare to turn off 
+  // take control of the gpio's 
+  int ret = 0; 
 
-//  slave_fpga_ctl  = bbio_gpio_open( cfg.master_fpga_power_gpio, BBB_IN); // should I turn it on or off... ? Leave it as input for now 
-//  bbb_gpio_set_value (slave_fpga_ctl, 0);  //prepare to turn off 
+  //this one should be active high to be on
+  master_fpga_ctl = bbb_gpio_open(MASTER_POWER_GPIO, cfg.init_state & NP_FPGA_POWER_MASTER, BBB_OUT); 
+  if (!master_fpga_ctl) ret+=1;  
 
-  return 0;
+  slave_fpga_ctl = bbb_gpio_open(SLAVE_POWER_GPIO, cfg.init_state & NP_FPGA_POWER_SLAVE, BBB_OUT); 
+  if (!slave_fpga_ctl) ret+=2;  
+
+  //this one is active low to be on 
+  comm_ctl = bbb_gpio_open(COMM_GPIO, !(cfg.init_state & NP_SPI_ENABLE), BBB_OUT); 
+
+  //assume active high to be on 
+  downhole_power_ctl = bbb_gpio_open(DOWNHOLE_GPIO, cfg.init_state & NP_DOWNHOLE_POWER, BBB_OUT); 
+
+  current_state = cfg.init_state; 
+  return ret;
 }
 
 
@@ -69,10 +95,9 @@ int nuphase_hk_init(const nuphase_hk_settings_t * settings)
 //------------------------------------------------------
 void nuphase_hk_settings_init(nuphase_hk_settings_t * settings) 
 {
-  settings->master_temperature_ain = 0; 
-  settings->slave_temperature_ain = 2; 
   settings->asps_serial_device = "/dev/ttyUSB0"; 
   settings->asps_address = "asps-daq";  // this can be defined, for example, in /etc/hosts
+  settings->init_state = NP_FPGA_POWER_MASTER | NP_FPGA_POWER_SLAVE | NP_SPI_ENABLE; 
 }
 
 //------------------------------------------------------
@@ -361,8 +386,8 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
   }
 
   /* now, read in our temperatures */ 
-  hk->temp_master = mV_to_C(bbb_ain_mV(cfg.master_temperature_ain)); 
-  hk->temp_slave = mV_to_C(bbb_ain_mV(cfg.slave_temperature_ain)); 
+  hk->temp_master = mV_to_C(bbb_ain_mV(MASTER_TEMP_AIN)); 
+  hk->temp_slave = mV_to_C(bbb_ain_mV(SLAVE_TEMP_AIN)); 
 
   /* figure out the disk space  and memory*/ 
   statvfs("/", &fs); 
@@ -371,7 +396,8 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
   hk->free_mem_kB = mem.freeram * mem.mem_unit / 1024;   //this doesn't properly take into account of cache / buffers, which would require parsing /proc/meminfo I think 
 
   /* check our gpio state */ 
-  //TODO 
+  //TODO: we could actually poll these. It's possible someone else may have changed them from underneath us. 
+  hk->gpio_state = current_state  ; 
 
   //get the time
   clock_gettime(CLOCK_REALTIME_COARSE, &now); 
@@ -383,7 +409,8 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
 }
 
 
-int nuphsae_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_method_t method) 
+// The ASPS power state delegator 
+int nuphase_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_method_t method) 
 {
 
   if (method == NP_ASPS_HTTP) 
@@ -392,12 +419,30 @@ int nuphsae_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_met
     return serial_set(st); 
 }
 
-int nuphase_set_fpga_power_state ( nuphase_fpga_power_state_t state) 
+/** GPIO State */ 
+int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state) 
 {
 
-  //TODO 
-  return 0; 
+  int ret = 0; 
+  ret += bbb_gpio_set( master_fpga_ctl, (state & NP_FPGA_POWER_MASTER)); 
+  ret += bbb_gpio_set( slave_fpga_ctl, (state & NP_FPGA_POWER_SLAVE)); 
 
+  //this one is active low
+  ret += bbb_gpio_set( comm_ctl, !(state & NP_SPI_ENABLE) ); 
+
+  ret += bbb_gpio_set( downhole_power_ctl, (state & NP_DOWNHOLE_POWER) ); 
+
+  current_state = state; 
+  return ret; 
 }
 
+__attribute__((destructor)) 
+static void nuphase_hk_destroy() 
+{
+  //do NOT unexport any of these!
+  bbb_gpio_close(master_fpga_ctl,0); 
+  bbb_gpio_close(slave_fpga_ctl,0); 
+  bbb_gpio_close(comm_ctl,0); 
+  bbb_gpio_close(downhole_power_ctl,0);  
+}
 

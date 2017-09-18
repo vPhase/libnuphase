@@ -671,12 +671,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master, const char * device
 
   if (gpio_number) 
   {
-    gpio_pin = bbb_gpio_open(gpio_number, BBB_OUT); 
-    if (gpio_pin) 
-    {
-      //set value low 
-      bbb_gpio_set(gpio_pin, 0); 
-    }
+    gpio_pin = bbb_gpio_open(gpio_number, 0, BBB_OUT); 
   }
 
   //make sure sync is off 
@@ -868,7 +863,7 @@ int nuphase_close(nuphase_dev_t * d)
 
   if (d->gpio_pin)
   {
-   ret += 256*bbb_gpio_close(d->gpio_pin); 
+   ret += 256*bbb_gpio_close(d->gpio_pin,0); 
   }
 
 
