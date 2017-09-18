@@ -1082,6 +1082,41 @@ int nuphase_get_thresholds(nuphase_dev_t *d, uint32_t * thresholds)
   return ret; 
 }
 
+#ifdef __arm__ 
+
+uint8_t reverse_bits(uint8_t in) 
+{
+  uint32_t input = in;
+  uint32_t output;
+  __asm__("rbit %0, %1\n" : "=r"(output) : "r"(input));
+  return output >> 24;
+}
+#else
+uint8_t reverse_bits(uint8_t in) 
+{
+  uint8_t out = 0; 
+  int i; 
+  for (i = 0; i < 8; i++) 
+  {
+    if (in & (1 << i))
+    {
+      out = out | ( 1 << (7-i)); 
+    }
+  }
+
+  return out; 
+}
+#endif
+
+void reverse_buf_bits(uint8_t * buf) 
+{
+  reverse_bits(buf[3]); 
+  reverse_bits(buf[2]); 
+  reverse_bits(buf[1]); 
+
+}
+
+
 
 
 int nuphase_set_attenuation(nuphase_dev_t * d, const uint8_t * attenuation_master, const uint8_t * attenuation_slave)
@@ -1092,6 +1127,9 @@ int nuphase_set_attenuation(nuphase_dev_t * d, const uint8_t * attenuation_maste
     uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, attenuation_master[2], attenuation_master[1], attenuation_master[0] }; 
     uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, attenuation_master[5], attenuation_master[4], attenuation_master[3] };
     uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, attenuation_master[7], attenuation_master[6] }; 
+    reverse_buf_bits(attenuation_012);
+    reverse_buf_bits(attenuation_345);
+    reverse_buf_bits(attenuation_067);
 
     USING(d); 
     ret += buffer_append(d,MASTER, attenuation_012,0); 
@@ -1106,7 +1144,9 @@ int nuphase_set_attenuation(nuphase_dev_t * d, const uint8_t * attenuation_maste
     uint8_t attenuation_012[NP_SPI_BYTES] = { REG_ATTEN_012, attenuation_slave[2], attenuation_slave[1], attenuation_slave[0] }; 
     uint8_t attenuation_345[NP_SPI_BYTES] = { REG_ATTEN_345, attenuation_slave[5], attenuation_slave[4], attenuation_slave[3] };
     uint8_t attenuation_067[NP_SPI_BYTES] = { REG_ATTEN_67, 0x0, attenuation_slave[7], attenuation_slave[6] }; 
-
+    reverse_buf_bits(attenuation_012);
+    reverse_buf_bits(attenuation_345);
+    reverse_buf_bits(attenuation_067);
     USING(d); 
     ret += buffer_append(d,SLAVE, attenuation_012,0); 
     ret += buffer_append(d,SLAVE, attenuation_345,0); 
@@ -1139,6 +1179,11 @@ int nuphase_get_attenuation(nuphase_dev_t * d, uint8_t * attenuation_master, uin
     ret += buffer_send(d,MASTER); 
     DONE(d)
 
+
+    reverse_buf_bits(attenuation_012);
+    reverse_buf_bits(attenuation_345);
+    reverse_buf_bits(attenuation_067);
+
     if (!ret) 
     {
       attenuation_master[0] =  attenuation_012[3]; 
@@ -1160,6 +1205,10 @@ int nuphase_get_attenuation(nuphase_dev_t * d, uint8_t * attenuation_master, uin
     ret += append_read_register(d,MASTER,REG_ATTEN_67 , attenuation_067); 
     ret += buffer_send(d,MASTER); 
     DONE(d)
+
+    reverse_buf_bits(attenuation_012);
+    reverse_buf_bits(attenuation_345);
+    reverse_buf_bits(attenuation_067);
 
     if (!ret) 
     {
