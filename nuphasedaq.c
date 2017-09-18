@@ -671,7 +671,8 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
 
   if (gpio_number) 
   {
-    gpio_pin = bbb_gpio_open(gpio_number, 0, BBB_OUT); 
+    gpio_pin = bbb_gpio_open(gpio_number); 
+    bbb_gpio_set(gpio_pin,0); 
   }
 
   //make sure sync is off 
