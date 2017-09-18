@@ -63,7 +63,6 @@ typedef struct nuphase_config
  uint8_t phased_trigger_readout;            //!< 1 to actually store events
  uint8_t trigger_holdoff;                   //!< Trigger holdoff
  uint8_t  pretrigger:3;                     //!< Amount of pre-trigger (multiple of 128 samples)  (3 bits);  
- nuphase_dev_t * master;                     
 } nuphase_config_t; 
 
 /** Fill the config with default options.*/ 
