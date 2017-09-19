@@ -217,7 +217,7 @@ static int http_set (const nuphase_asps_power_state_t  state)
 {
   static char * buf = 0; 
   if (!buf ) buf = malloc(strlen(cfg.asps_address)+64); 
-  sprintf(buf, "http://%s?%d&%d&%d&%d&%d" , cfg.asps_address, state & 1, state & 2, state & 4, state & 8, state & 16); 
+  sprintf(buf, "http://%s?0=%d&1=%d&2=%d&3=%d&4=%d" , cfg.asps_address, !!(state & 1), !!(state & 2), !!(state & 4), !!(state & 8), !!(state & 16)); 
 
   //init cURL if not init
   if (!curl) curl = curl_easy_init(); 
