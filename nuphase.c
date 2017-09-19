@@ -2,6 +2,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdlib.h>
+#include <time.h> 
 
 //these need to be incremented if the structs change incompatibly
 //and then generic_*_read must be updated to delegate appropriately. 
@@ -659,11 +660,11 @@ int nuphase_hk_gzread(gzFile f, nuphase_hk_t * h)
 int nuphase_status_print(FILE *f, const nuphase_status_t *st)
 {
   int i ; 
-  struct tm  tim; 
+  struct tm * tim; 
   char timstr[128]; 
   time_t t = st->readout_time;
-  gmtime_r((time_t*) &t, &tim); 
-  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+  tim = gmtime((time_t*) &t); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
   fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id, timstr, st->readout_time_ns); 
 
   fprintf(f,"\t which \t 0.1 Hz, gated 0.1Hz, 1 Hz\n"); 
@@ -681,7 +682,7 @@ static const char * trig_type_names[4]  = { "NONE", "SW", "RF" ,"EXT" } ;
 int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
 {
   int i; 
-  struct tm  tim; 
+  struct tm* tim; 
   time_t t; 
   char timstr[128]; 
 
@@ -691,14 +692,14 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
   fprintf(f, "\tbuf len: %u ; pretrig: %u\n", hd->buffer_length, hd->pretrigger_samples); 
   fprintf(f,"\tbuf num: %u, buf_mask: %x\n", hd->buffer_number, hd->buffer_mask); 
   t = hd->readout_time[0];
-  gmtime_r((time_t*) &t, &tim); 
-  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+  tim = gmtime((time_t*) &t); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
   fprintf(f, "\tbd %d rdout time: %s.%09d UTC\n",hd->board_id[0],timstr, hd->readout_time_ns[0]); 
   if (hd->board_id[1])
   {
     t = hd->readout_time[1];
-    gmtime_r((time_t*) &t, &tim); 
-    strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+    tim = gmtime((time_t*) &t); 
+    strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
     fprintf(f, "\tbd %d rdout time: %s.%09d UTC\n",hd->board_id[1], timstr, hd->readout_time_ns[1]); 
    
   }
@@ -712,8 +713,8 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
   }
 
   t = hd->approx_trigger_time; 
-  gmtime_r((time_t*) &t, &tim); 
-  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+  tim = gmtime((time_t*) &t); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
   fprintf(f, "\ttrig time (est.): %s.%09d UTC\n",timstr, hd->approx_trigger_time_nsecs); 
   fprintf(f, "\ttrig beams: %x\n", hd->triggered_beams); 
   fprintf(f, "\tenabld beams: %x\n", hd->beam_mask); 
@@ -753,11 +754,11 @@ int nuphase_event_print(FILE *f, const nuphase_event_t *ev, char sep)
 
 int nuphase_hk_print(FILE * f, const nuphase_hk_t *hk) 
 {
-  struct tm  tim; 
+  struct tm*  tim; 
   char timstr[128]; 
   time_t t = hk->unixTime;
-  gmtime_r((time_t*) &t, &tim); 
-  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", &tim);  
+  tim = gmtime(&t); 
+  strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
   fprintf(f,"NuPhase HK (at %s.%03d UTC)\n", timstr, hk->unixTimeMillisecs); 
   fprintf(f,"  Temperatures: \n"); 
   fprintf(f,"      MASTER:  %d C\n", hk->temp_master); 
