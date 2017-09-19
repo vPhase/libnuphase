@@ -421,7 +421,7 @@ static nuphase_gpio_power_state_t query_gpio_state()
     state = state | NP_SPI_ENABLE; 
   }
 
-  if (downhole_power_ctl && bbb_gpio_get(comm_ctl) == 1)
+  if (downhole_power_ctl && bbb_gpio_get(downhole_power_ctl) == 1)
   {
     state = state | NP_DOWNHOLE_POWER; 
   }
