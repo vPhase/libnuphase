@@ -469,9 +469,9 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
 
   /* figure out the disk space  and memory*/ 
   statvfs("/", &fs); 
-  hk->disk_space_kB = fs.f_frsize * fs.f_bavail / 1024; 
+  hk->disk_space_kB = fs.f_bsize * (fs.f_bavail >> 10) ; 
   sysinfo(&mem); 
-  hk->free_mem_kB = mem.freeram * mem.mem_unit / 1024;   //this doesn't properly take into account of cache / buffers, which would require parsing /proc/meminfo I think 
+  hk->free_mem_kB = (mem.freeram * mem.mem_unit) >> 10 ;   //this doesn't properly take into account of cache / buffers, which would require parsing /proc/meminfo I think 
 
   /* check our gpio state */ 
   hk->gpio_state = query_gpio_state()  ; 
