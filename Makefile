@@ -1,8 +1,15 @@
 CC=gcc
 LD=gcc
-CFLAGS+=-fPIC -g -Wall -Wextra 
-LDFLAGS+= -lz 
-DAQ_LDFLAGS+= -lpthread -lcurl  
+CFLAGS+=-fPIC -g -Wall -Wextra  -D_GNU_SOURCE
+LDFLAGS+= -fPIC -lz -g
+
+ENABLE_CURL=0
+
+DAQ_LDFLAGS+= -lpthread -L./ -lnuphase
+ifeq (ENABLE_CURL,1) 
+	CFLAGS+=-DWITH_CURL 
+	DAQ_LDFLAGS+= `curl-config --libs`
+endif
 
 #uncomment to enable excessive printouts
 #CFLAGS+=-DDEBUG_PRINTOUTS
@@ -25,10 +32,10 @@ all: libnuphase.so libnuphasedaq.so
 client: libnuphase.so 
 
 libnuphase.so: $(OBJS) $(HEADERS)
-	$(CC) -shared $(OBJS) -o $@ $(LDFLAGS) 
+	$(CC) $(LDFLAGS)  -shared $(OBJS) -o $@
 
 libnuphasedaq.so: $(DAQ_OBJS) $(DAQ_HEADERS)
-	$(CC) -shared $(DAQ_OBJS) -o $@ $(DAQ_LDFLAGS) 
+	$(CC) $(LDFLAGS) $(DAQ_LDFLAGS) -shared $(DAQ_OBJS) -o $@ 
 
 
 install-doc:
