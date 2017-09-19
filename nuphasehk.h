@@ -27,10 +27,9 @@ typedef enum nuphase_asps_method
 } nuphase_asps_method_t; 
 
 /** These settings all have sensible defaults, 
- * but you may choose to initialize with other values if necessary */; 
+ * but you may choose to initialize with other values if necessary */ 
 typedef struct nuphase_hk_settings
 {
-  nuphase_gpio_power_state_t init_state;   // The initial state of the GPIO pins. Default is on (but some things will still be off if they're not enabled on the ASPS-DAQ) 
   const char * asps_serial_device;         // The serial device to use to communicate with the ASPS-DAQ via serial ( default: /dev/ttyUSB0 )
   const char * asps_address;               // The hostname or IP address to communicate with the ASPS-DAQ via http (Default asps-daq, which may be set in /etc/hosts to something useful) 
 } nuphase_hk_settings_t; 
