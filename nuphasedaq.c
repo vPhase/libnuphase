@@ -1,4 +1,3 @@
-#define _GNU_SOURCE //required for ppoll. 
 
 #include "nuphasedaq.h" 
 #include <linux/spi/spidev.h>
@@ -1250,7 +1249,13 @@ nuphase_trigger_enable_t nuphase_get_trigger_enables(nuphase_dev_t * d, nuphase_
 int nuphase_phased_trigger_readout(nuphase_dev_t * d, int phased) 
 {
     uint8_t trigger_buf[NP_SPI_BYTES] = {REG_PHASED_TRIGGER, 0, 0, phased & 1}; 
-    return synchronized_command(d, trigger_buf, 0,0,0); 
+    USING(d); 
+    if (d->fd[1]) do_write(d->fd[SLAVE], trigger_buf); 
+    do_write(d->fd[MASTER], trigger_buf); 
+    DONE(d); 
+
+    return 0; 
+
 }
 
 int set_trigger_holdoff(nuphase_dev_t * d, uint16_t trigger_holdoff)
@@ -1748,7 +1753,7 @@ int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
    **/
 
 
-  if (! nuphase_phased_trigger_readout(d,0)) 
+  if (nuphase_phased_trigger_readout(d,0)) 
   {
         fprintf(stderr, "Unable to turn off readout. Aborting reset\n"); 
         return 1; 
@@ -1977,10 +1982,6 @@ int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
 
     //take average for the start time
     d->start_time = avg_time(tbefore,tafter); 
-
-
-   //finally we must configure it the way we like it (slave first, so that we don't start triggering) 
-   //also, let's switch off the input while doing this just in case 
 
    int ret  = 0; 
 
