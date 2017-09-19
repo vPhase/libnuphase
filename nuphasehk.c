@@ -36,7 +36,7 @@ static int already_init_hk = 0;
 //---------------------------------------------
 // Global HK settings 
 //---------------------------------------------
-static nuphase_hk_settings_t cfg; 
+static nuphase_hk_settings_t cfg = {.asps_serial_device = 0, .asps_address = 0} ; 
 
 
 int nuphase_hk_init(const nuphase_hk_settings_t * settings) 
@@ -325,18 +325,19 @@ typedef struct
 static int serial_update(nuphase_hk_t * hk) 
 {
 
+
   const char  query_string[] = "hkbin\r"; 
   binary_hk_data data; 
   int nfails = 0; 
   if (!serial_fd) serial_init(); 
 
+  tcflush(serial_fd, TCIOFLUSH); 
+
   //If the ASPS-DAQ gets rebooted while we're querying it, we are going to get
   //a bunch of junk.  That is pretty unlikely, but it could happen . So we'll
   //try a few times
-  
   while (nfails++ < 5) 
   {
-    tcflush(serial_fd, TCIOFLUSH); 
     write(serial_fd,query_string, sizeof(query_string)-1); 
     //looks like CmdArduino echoes everything 
     char garbage = '0'; 
@@ -346,10 +347,15 @@ static int serial_update(nuphase_hk_t * hk)
     }
 
     read(serial_fd, &data, sizeof(data)); 
+    tcflush(serial_fd, TCIOFLUSH); 
 
     if ( data.magic_start != 0xe110 || data.magic_end != 0xef0f) 
     {
       fprintf(stderr,"Didn't get right magic bytes. Got: %x %x Will try again.\n", data.magic_start, data.magic_end); 
+      write(serial_fd,"\r",1); 
+      usleep(1000); 
+      tcflush(serial_fd, TCIOFLUSH); 
+      
     }
     else
     {
@@ -380,9 +386,11 @@ static int serial_set(const nuphase_asps_method_t state)
 {
   char buf[128]; 
   //note... this mask isn't in hex right now because the ASPS-DAQ isn't expecting in hex. 
-  int len = sprintf(buf,"ctlmask %u\r\n", state); 
+  int len = sprintf(buf,"\rctlmask %u\r", state); 
   if (!serial_fd) serial_init(); 
-  return write(serial_fd, buf, len) != len; 
+  int written =  write(serial_fd, buf, len); 
+  tcdrain(serial_fd); 
+  return written != len; 
 }
 
 
@@ -392,6 +400,7 @@ static int serial_set(const nuphase_asps_method_t state)
 static nuphase_gpio_power_state_t query_gpio_state() 
 {
 
+  if (!gpios_are_setup) setup_gpio(); 
   nuphase_gpio_power_state_t state = 0; 
 
   //master is on as an input, I think
