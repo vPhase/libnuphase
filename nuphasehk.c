@@ -435,7 +435,7 @@ static nuphase_gpio_power_state_t query_gpio_state()
 //-------------------------------------
 static float mV_to_C(float val_mV) 
 {
-  return (1858.3-val_mV)  * 0.08569; 
+  return (1858.3-2*val_mV)  * 0.08569; 
 }
 
 
