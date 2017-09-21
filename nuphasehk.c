@@ -108,6 +108,28 @@ void nuphase_hk_settings_init(nuphase_hk_settings_t * settings)
   settings->asps_address = "asps-daq";  // this can be defined, for example, in /etc/hosts
 }
 
+/* parse the json string for the current. very dumb */
+static int parse_string_for_current (const char * buf) 
+{
+
+  char * start = strstr(buf, "{\"pid\":["); 
+  if (!start) 
+  {
+    return -1; 
+  }
+      
+  int current ;
+
+  if (sscanf(start,"{\"pid\":[%d", &current) < 1) 
+  {
+    return -1;  //found less than 1 token 
+  }
+
+  return current; 
+}
+
+
+
 //------------------------------------------------------
 // now comes http handling code, for communicating with
 // the ASPS-DAQ via http. We use the cURL "easy" API 
@@ -147,9 +169,11 @@ static size_t save_http(char * ptr, size_t size, size_t nmemb, void * user)
   memcpy (http_buf + http_buf_pos, ptr, size*nmemb); 
   http_buf_pos += size * nmemb; 
   http_buf[http_buf_pos] = 0; // set the null byte
+//  printf("save_http called, buf is :%s\n", http_buf); 
 
-  return size + nmemb;  //if we don't return the size given, cURL gets angry
+  return size * nmemb;  //if we don't return the size given, cURL gets angry
 }
+
 
 // this actually parses our buffer looking for our hk data 
 static int parse_http (const char * httpbuf , nuphase_hk_t * hk) 
@@ -190,7 +214,7 @@ static int http_update(nuphase_hk_t * hk)
  
   if (!update_url)   
   {
-    asprintf(&update_url, "http://%s/", cfg.asps_address); 
+    asprintf(&update_url, "http://%s/parse.html", cfg.asps_address); 
   }
 
   // set the url 
@@ -212,24 +236,94 @@ static int http_update(nuphase_hk_t * hk)
   return parse_http(http_buf, hk); 
 }
 
+static char * http_set_buf = 0; 
 /// this sets the power state using http and a GET
 static int http_set (const nuphase_asps_power_state_t  state) 
 {
-  static char * buf = 0; 
-  if (!buf ) buf = malloc(strlen(cfg.asps_address)+64); 
-  sprintf(buf, "http://%s?0=%d&1=%d&2=%d&3=%d&4=%d" , cfg.asps_address, !!(state & 1), !!(state & 2), !!(state & 4), !!(state & 8), !!(state & 16)); 
+  if (!http_set_buf ) http_set_buf = malloc(strlen(cfg.asps_address)+64); 
+  sprintf(http_set_buf, "http://%s?0=%d&1=%d&2=%d&3=%d&4=%d" , cfg.asps_address, !!(state & 1), !!(state & 2), !!(state & 4), !!(state & 8), !!(state & 16)); 
 
   //init cURL if not init
   if (!curl) curl = curl_easy_init(); 
 
   //set the URL 
-  curl_easy_setopt(curl, CURLOPT_URL, buf); 
+  curl_easy_setopt(curl, CURLOPT_URL, http_set_buf); 
 
   //we don't need to download the body afterwards 
   curl_easy_setopt(curl, CURLOPT_NOBODY,1); 
 
   return curl_easy_perform(curl); 
 }
+
+/// this sets the power state using http and a GET
+static char * heater_url = 0; 
+static int http_set_heater (int current) 
+{
+  if (!heater_url ) 
+  {
+    asprintf(&heater_url, "http://%s/heater.html", cfg.asps_address); 
+  }
+
+  char postbuf[32]; 
+  sprintf(postbuf,"heater=%d", current); 
+
+  //init cURL if not init
+  if (!curl) curl = curl_easy_init(); 
+
+  //set the URL 
+  curl_easy_setopt(curl, CURLOPT_URL, heater_url); 
+
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS,postbuf); 
+
+  //might as well save the output. We could check to make sure it was successful I suppose... 
+  curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, save_http); 
+
+  //reset http buf position
+  http_buf_pos = 0; 
+
+
+  return curl_easy_perform(curl); 
+}
+
+// this will load the power via a GET reequest 
+static int http_get_heater() 
+{
+  if (!heater_url ) 
+  {
+    asprintf(&heater_url, "http://%s/heater.html", cfg.asps_address); 
+  }
+
+  //init our cURL handle if it hasn't been already
+  if (!curl) curl = curl_easy_init(); 
+ 
+  // set the url 
+  curl_easy_setopt( curl, CURLOPT_URL, heater_url); 
+
+  // make sure we download
+  curl_easy_setopt(curl, CURLOPT_HTTPGET,1); 
+
+  // set the call back 
+  curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, save_http); 
+
+  int nfails = 0;
+  while (nfails++ < 5)
+  {
+    // reset the http buf position 
+    http_buf_pos = 0; 
+
+    curl_easy_perform(curl); 
+
+    int current = parse_string_for_current(http_buf); 
+    if (current >=0 ) return current; 
+
+    fprintf(stderr,"Couldn't find current in string \"%s\"\n", http_buf); 
+  }
+
+  fprintf(stderr,"Too many fails in set heater :(\n"); 
+  return -1; 
+
+}
+
 
 //be a good citizen and deallocate our cURL stuff at the end 
 __attribute__((destructor)) 
@@ -244,6 +338,12 @@ static int destroy_curl()
   {
     free(update_url); 
   }
+
+  if (heater_url) 
+  {
+    free(heater_url); 
+  }
+
   return 0; 
 }
 
@@ -261,6 +361,20 @@ static int http_update(nuphase_hk_t * hk)
   fprintf(stderr,"Compiled without cURL support\n"); 
   return 1; 
 }
+
+static int http_set_heater(int current) 
+{
+  (void) current; 
+  fprintf(stderr,"Compiled without cURL support\n"); 
+  return 1;
+}
+
+static int http_get_heater() 
+{
+  fprintf(stderr,"Compiled without cURL support\n"); 
+  return -1; 
+}
+
 
 
 #endif
@@ -376,12 +490,14 @@ static int serial_update(nuphase_hk_t * hk)
   return 1; 
 }
 
+//------------------------------------------------------------------------------------------
 // set the power state using our new ctlmask command
 // TODO: If the ASPS-DAQ restarts in the middle of this, 
 //       it probably won't be able to process our message properly.
 //       
 //       We could flush before and read after to make sure that there is nothing unexpected. 
 //
+//------------------------------------------------------------------------------------------
 static int serial_set(const nuphase_asps_method_t state) 
 {
   char buf[128]; 
@@ -393,6 +509,55 @@ static int serial_set(const nuphase_asps_method_t state)
   return written != len; 
 }
 
+static int serial_set_heater(int current) 
+{
+  char buf[128]; 
+  int len = sprintf(buf,"\rheaterCurrent %u\r", current); 
+  if (!serial_fd) serial_init(); 
+  int written =  write(serial_fd, buf, len); 
+  tcdrain(serial_fd); 
+  return written != len; 
+}
+
+static int serial_get_heater() 
+{
+  char buf[256]; 
+  char writebuf[64]; 
+  int len = sprintf(writebuf,"heaterLine\r"); 
+  if (!serial_fd) serial_init(); 
+  tcflush(serial_fd, TCIOFLUSH); 
+  int nfails = 0; 
+  while ( nfails++ < 5) 
+  {
+    write(serial_fd, writebuf, len); 
+
+
+    //throw away the first line
+    char garbage = '0'; 
+    int pos = 0; 
+    while (garbage != '\n') read(serial_fd, &garbage,1); 
+
+    //now read in a line 
+    do 
+    {
+      read(serial_fd, &buf[pos++],1); 
+    }
+    while ( buf[pos-1] != '\n' && pos < 256); 
+
+    
+    int current = parse_string_for_current(buf); 
+
+
+    if ( current >=0) return current; 
+    else
+    {
+      fprintf(stderr,"Could not read current in string: \"%s\"\n", buf); 
+    }
+  }
+
+  fprintf(stderr,"Too many fails in get heater :(\n"); 
+  return -1; 
+}
 
 //---------------------------------------------------
 // Read in the GPIO state
@@ -486,7 +651,9 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
 }
 
 
+//-----------------------------------------
 // The ASPS power state delegator 
+//-----------------------------------------
 int nuphase_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_method_t method) 
 {
 
@@ -498,7 +665,9 @@ int nuphase_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_met
     return serial_set(st); 
 }
 
-/** GPIO State */ 
+//-----------------------------------------
+//  GPIO State 
+//-----------------------------------------
 int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state) 
 {
   if (!already_init_hk) nuphase_hk_init(0); 
@@ -518,6 +687,42 @@ int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state)
 }
 
 
+///////////////////////////////////////////////////////////
+//  Dispatcher for getting the current 
+///////////////////////////////////////////////////////////
+int nuphase_get_heater_current(nuphase_asps_method_t method) 
+{
+  if (!already_init_hk) nuphase_hk_init(0); 
+
+  if (method == NP_ASPS_HTTP) 
+  {
+    return http_get_heater(); 
+  }
+  else return serial_get_heater(); 
+}
+
+///////////////////////////////////////////////////////////
+//  Dispatcher for setting the current 
+//  /////////////////////////////////////////////////////////////////
+int nuphase_set_heater_current(int current, nuphase_asps_method_t method) 
+{
+  if (!already_init_hk) nuphase_hk_init(0); 
+
+  if (method == NP_ASPS_HTTP) 
+  {
+    return http_set_heater(current); 
+  }
+  else return serial_set_heater(current); 
+
+}
+
+
+
+
+
+//-----------------------------------------
+//    deinit
+//-----------------------------------------
 __attribute__((destructor)) 
 static void nuphase_hk_destroy() 
 {
@@ -527,6 +732,8 @@ static void nuphase_hk_destroy()
   if (comm_ctl) bbb_gpio_close(comm_ctl,0); 
   if (downhole_power_ctl) bbb_gpio_close(downhole_power_ctl,0);  
 }
+
+
 
 
 

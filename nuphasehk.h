@@ -13,6 +13,9 @@
  *
  *   To set the GPIO power states  
  *
+ *
+ *  This library uses static internal buffers so it is not thread-safe nor reentrant! 
+ *
  *  Cosmin Deaconu
  *  <cozzyd@kicp.uchicago.edu> 
  *
@@ -51,5 +54,14 @@ int nuphase_set_asps_power_state ( nuphase_asps_power_state_t state, nuphase_asp
 
 /** Set the GPIO power state. For the FPGA's to be on, the relevant ASPS power state must also be enabled */ 
 int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state); 
+
+
+/* Gets the pid goal of the heater via the method */ 
+int nuphase_get_heater_current(nuphase_asps_method_t method); 
+
+/* Sets the pid goal of the heater using the method. Note that the heater on after end time
+ * might set this from underneath us */ 
+int nuphase_set_heater_current(int current_mA, nuphase_asps_method_t method); 
+
 
 #endif
