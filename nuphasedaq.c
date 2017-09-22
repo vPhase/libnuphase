@@ -582,13 +582,14 @@ int nuphase_sw_trigger(nuphase_dev_t * d )
   const uint8_t buf[4] = { REG_FORCE_TRIG, 0,0, 1};  
   int ret = 0; 
 
-  USING(d); 
 
   if (NBD(d) < 2) 
   {
+    USING(d); 
     int wrote; 
     wrote = do_write(d->fd[0], buf); //always the master
     ret = wrote == NP_SPI_BYTES ? 0 : -1;  
+    DONE(d); 
   }
   else
   {
@@ -596,7 +597,6 @@ int nuphase_sw_trigger(nuphase_dev_t * d )
   }
 
 
-  DONE(d); 
   return ret; 
 }
 
