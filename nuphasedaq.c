@@ -134,6 +134,7 @@ struct nuphase_dev
   uint8_t next_read_buffer; //what buffer to read next 
   uint8_t hardware_next; // what buffer the hardware things we should read next 
 
+  uint32_t min_threshold; 
   int spi_clock; 
   int cs_change; 
   int delay_us; 
@@ -696,6 +697,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->current_mode[0] = -1; 
   dev->current_mode[1] = -1; 
 
+  dev->min_threshold = 5000; 
 
   //Configure the SPI protocol 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
@@ -1041,10 +1043,11 @@ int nuphase_set_thresholds(nuphase_dev_t *d, const uint32_t * trigger_thresholds
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
     if (dont & (i << i)) continue; 
+    int threshold = trigger_thresholds[i] < d->min_threshold ? d->min_threshold: trigger_thresholds[i]; 
     thresholds_buf[i][0]= REG_THRESHOLDS+i ;
-    thresholds_buf[i][1]= (trigger_thresholds[i] >> 16 ) & 0xf;
-    thresholds_buf[i][2]= (trigger_thresholds[i] >> 8) & 0xff; 
-    thresholds_buf[i][3]= trigger_thresholds[i] & 0xff;
+    thresholds_buf[i][1]= (threshold >> 16 ) & 0xf;
+    thresholds_buf[i][2]= (threshold >> 8) & 0xff; 
+    thresholds_buf[i][3]= threshold & 0xff;
     ret += buffer_append (d,MASTER,thresholds_buf[i],0); 
   }
     
