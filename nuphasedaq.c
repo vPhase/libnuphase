@@ -921,7 +921,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
       waited += POLL_USLEEP * 1e-6; //us to s 
       something = nuphase_check_buffers(d,&d->hardware_next,which); 
   }
-    int interrupted = d->cancel_wait; //were we interrupted? 
+  int interrupted = d->cancel_wait; //were we interrupted? 
 
   if (ready_buffers) *ready_buffers = something;  //save to ready
   d->cancel_wait = 0;  //clear the wait
@@ -1635,6 +1635,8 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   clock_gettime(CLOCK_REALTIME, &now); 
   ret+= buffer_send(d,which); 
   DONE(d); 
+
+  ret+= nuphase_get_thresholds(d, st->trigger_thresholds); 
 
   if (ret) return ret; 
   st->deadtime = 0; //TODO 
