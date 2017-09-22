@@ -1,13 +1,8 @@
-//for asprintf 
-#define _GNU_SOURCE
-
-
 #include "nuphasehk.h"
 #include "bbb_ain.h" 
 #include "bbb_gpio.h" 
 
 #include <time.h> 
-#include <curl/curl.h> 
 #include <stdio.h> 
 #include <sys/statvfs.h> 
 #include <stdlib.h>
@@ -17,25 +12,11 @@
 #include <string.h> 
 #include <fcntl.h> 
 
+#ifdef WITH_CURL 
+#include <curl/curl.h> 
+#endif
 
 
-
-//---------------------------------------------
-//   device handles for the GPIO pins 
-//---------------------------------------------
-static bbb_gpio_pin_t * master_fpga_ctl = 0; 
-static bbb_gpio_pin_t * slave_fpga_ctl = 0; 
-static bbb_gpio_pin_t * comm_ctl = 0; 
-static bbb_gpio_pin_t * downhole_power_ctl = 0; 
-
-
-static nuphase_gpio_power_state_t current_state = 0; 
-
-
-//---------------------------------------------
-// Global HK settings 
-//---------------------------------------------
-static nuphase_hk_settings_t cfg; 
 
 #define MASTER_TEMP_AIN 0
 #define SLAVE_TEMP_AIN  2
@@ -45,19 +26,25 @@ static nuphase_hk_settings_t cfg;
 #define DOWNHOLE_GPIO 66
 
 
-
 //---------------------------------------------------
-// HK initializiation, offering option to initialize with the given settings
+// HK initialization, offering option to initialize with the given settings
 //   Also, keep track if we have been init to init on first call and
 //   prevent initializing more than once 
 //-------------------------------------------------
-static int already_init = 0; 
+static int already_init_hk = 0; 
+
+//---------------------------------------------
+// Global HK settings 
+//---------------------------------------------
+static nuphase_hk_settings_t cfg = {.asps_serial_device = 0, .asps_address = 0} ; 
+
+
 int nuphase_hk_init(const nuphase_hk_settings_t * settings) 
 {
 
-  if (already_init) 
+  if (already_init_hk) 
   {
-    fprintf(stderr,"Cannot intialize hk more than once.\n"); 
+    fprintf(stderr,"Cannot init hk more than once.\n"); 
     return 1;  
   }
   if (settings)
@@ -69,23 +56,45 @@ int nuphase_hk_init(const nuphase_hk_settings_t * settings)
     nuphase_hk_settings_init(&cfg); 
   }
 
+  already_init_hk = 1; 
+  return 0; 
+
+}
+
+static int gpios_are_setup = 0;
+
+//---------------------------------------------
+//   device handles for the GPIO pins 
+//---------------------------------------------
+static bbb_gpio_pin_t * master_fpga_ctl = 0; 
+static bbb_gpio_pin_t * slave_fpga_ctl = 0; 
+static bbb_gpio_pin_t * comm_ctl = 0; 
+static bbb_gpio_pin_t * downhole_power_ctl = 0; 
+
+
+/** GPIO Setup
+ *
+ *  This just exports them
+ *  
+ **/ 
+static int setup_gpio() 
+{
   // take control of the gpio's 
   int ret = 0; 
 
-  //this one should be active high to be on
-  master_fpga_ctl = bbb_gpio_open(MASTER_POWER_GPIO, cfg.init_state & NP_FPGA_POWER_MASTER, BBB_OUT); 
+  master_fpga_ctl = bbb_gpio_open(MASTER_POWER_GPIO);
   if (!master_fpga_ctl) ret+=1;  
 
-  slave_fpga_ctl = bbb_gpio_open(SLAVE_POWER_GPIO, cfg.init_state & NP_FPGA_POWER_SLAVE, BBB_OUT); 
+  slave_fpga_ctl = bbb_gpio_open(SLAVE_POWER_GPIO); 
   if (!slave_fpga_ctl) ret+=2;  
 
-  //this one is active low to be on 
-  comm_ctl = bbb_gpio_open(COMM_GPIO, !(cfg.init_state & NP_SPI_ENABLE), BBB_OUT); 
+  comm_ctl = bbb_gpio_open(COMM_GPIO); 
+  if (!comm_ctl) ret+=4; 
 
-  //assume active high to be on 
-  downhole_power_ctl = bbb_gpio_open(DOWNHOLE_GPIO, cfg.init_state & NP_DOWNHOLE_POWER, BBB_OUT); 
+  downhole_power_ctl = bbb_gpio_open(DOWNHOLE_GPIO); 
+  if (!downhole_power_ctl) ret+=8; 
 
-  current_state = cfg.init_state; 
+  gpios_are_setup = 1; 
   return ret;
 }
 
@@ -97,8 +106,29 @@ void nuphase_hk_settings_init(nuphase_hk_settings_t * settings)
 {
   settings->asps_serial_device = "/dev/ttyUSB0"; 
   settings->asps_address = "asps-daq";  // this can be defined, for example, in /etc/hosts
-  settings->init_state = NP_FPGA_POWER_MASTER | NP_FPGA_POWER_SLAVE | NP_SPI_ENABLE; 
 }
+
+/* parse the json string for the current. very dumb */
+static int parse_string_for_current (const char * buf) 
+{
+
+  char * start = strstr(buf, "{\"pid\":["); 
+  if (!start) 
+  {
+    return -1; 
+  }
+      
+  int current ;
+
+  if (sscanf(start,"{\"pid\":[%d", &current) < 1) 
+  {
+    return -1;  //found less than 1 token 
+  }
+
+  return current; 
+}
+
+
 
 //------------------------------------------------------
 // now comes http handling code, for communicating with
@@ -107,6 +137,7 @@ void nuphase_hk_settings_init(nuphase_hk_settings_t * settings)
 // parse it by looking four our magic parse-friendly strings
 //---------------------------------------------------------
 
+#ifdef WITH_CURL
 static CURL * curl = 0; //cURL handle
 static char * http_buf = 0;  //the http buffer 
 static size_t http_buf_pos = 0;  //our position within the http buffer
@@ -117,7 +148,7 @@ static size_t save_http(char * ptr, size_t size, size_t nmemb, void * user)
 {
   (void) user; 
 
-  if (!http_buf_size)  // we haven't allocated a buffer yet. let's do it. minimum of 16K or whatever cURL passes us, +1 for null byte
+  if (!http_buf)  // we haven't allocated a buffer yet. let's do it. minimum of 16K or whatever cURL passes us, +1 for null byte
   {
     http_buf_size = size*nmemb < 16 * 1024 ? 1+ 16 * 1024 : size*nmemb + 1; 
     http_buf = malloc(http_buf_size); 
@@ -134,12 +165,15 @@ static size_t save_http(char * ptr, size_t size, size_t nmemb, void * user)
   
 
   //copy into our buffer
+//  printf("memcpy(%x, %x, %u)\n", http_buf + http_buf_pos, ptr, size*nmemb); 
   memcpy (http_buf + http_buf_pos, ptr, size*nmemb); 
   http_buf_pos += size * nmemb; 
   http_buf[http_buf_pos] = 0; // set the null byte
+//  printf("save_http called, buf is :%s\n", http_buf); 
 
-  return size + nmemb;  //if we don't return the size given, cURL gets angry
+  return size * nmemb;  //if we don't return the size given, cURL gets angry
 }
+
 
 // this actually parses our buffer looking for our hk data 
 static int parse_http (const char * httpbuf , nuphase_hk_t * hk) 
@@ -180,7 +214,7 @@ static int http_update(nuphase_hk_t * hk)
  
   if (!update_url)   
   {
-    asprintf(&update_url, "http://%s/", cfg.asps_address); 
+    asprintf(&update_url, "http://%s/parse.html", cfg.asps_address); 
   }
 
   // set the url 
@@ -202,24 +236,94 @@ static int http_update(nuphase_hk_t * hk)
   return parse_http(http_buf, hk); 
 }
 
+static char * http_set_buf = 0; 
 /// this sets the power state using http and a GET
 static int http_set (const nuphase_asps_power_state_t  state) 
 {
-  static char * buf = 0; 
-  if (!buf ) buf = malloc(strlen(cfg.asps_address)+64); 
-  sprintf(buf, "http://%s?%d&%d&%d&%d&%d" , cfg.asps_address, state & 1, state & 2, state & 4, state & 8, state & 16); 
+  if (!http_set_buf ) http_set_buf = malloc(strlen(cfg.asps_address)+64); 
+  sprintf(http_set_buf, "http://%s?0=%d&1=%d&2=%d&3=%d&4=%d" , cfg.asps_address, !!(state & 1), !!(state & 2), !!(state & 4), !!(state & 8), !!(state & 16)); 
 
   //init cURL if not init
   if (!curl) curl = curl_easy_init(); 
 
   //set the URL 
-  curl_easy_setopt(curl, CURLOPT_URL, buf); 
+  curl_easy_setopt(curl, CURLOPT_URL, http_set_buf); 
 
   //we don't need to download the body afterwards 
   curl_easy_setopt(curl, CURLOPT_NOBODY,1); 
 
   return curl_easy_perform(curl); 
 }
+
+/// this sets the power state using http and a GET
+static char * heater_url = 0; 
+static int http_set_heater (int current) 
+{
+  if (!heater_url ) 
+  {
+    asprintf(&heater_url, "http://%s/heater.html", cfg.asps_address); 
+  }
+
+  char postbuf[32]; 
+  sprintf(postbuf,"heater=%d", current); 
+
+  //init cURL if not init
+  if (!curl) curl = curl_easy_init(); 
+
+  //set the URL 
+  curl_easy_setopt(curl, CURLOPT_URL, heater_url); 
+
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS,postbuf); 
+
+  //might as well save the output. We could check to make sure it was successful I suppose... 
+  curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, save_http); 
+
+  //reset http buf position
+  http_buf_pos = 0; 
+
+
+  return curl_easy_perform(curl); 
+}
+
+// this will load the power via a GET reequest 
+static int http_get_heater() 
+{
+  if (!heater_url ) 
+  {
+    asprintf(&heater_url, "http://%s/heater.html", cfg.asps_address); 
+  }
+
+  //init our cURL handle if it hasn't been already
+  if (!curl) curl = curl_easy_init(); 
+ 
+  // set the url 
+  curl_easy_setopt( curl, CURLOPT_URL, heater_url); 
+
+  // make sure we download
+  curl_easy_setopt(curl, CURLOPT_HTTPGET,1); 
+
+  // set the call back 
+  curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, save_http); 
+
+  int nfails = 0;
+  while (nfails++ < 5)
+  {
+    // reset the http buf position 
+    http_buf_pos = 0; 
+
+    curl_easy_perform(curl); 
+
+    int current = parse_string_for_current(http_buf); 
+    if (current >=0 ) return current; 
+
+    fprintf(stderr,"Couldn't find current in string \"%s\"\n", http_buf); 
+  }
+
+  fprintf(stderr,"Too many fails in set heater :(\n"); 
+  return -1; 
+
+}
+
 
 //be a good citizen and deallocate our cURL stuff at the end 
 __attribute__((destructor)) 
@@ -234,10 +338,46 @@ static int destroy_curl()
   {
     free(update_url); 
   }
+
+  if (heater_url) 
+  {
+    free(heater_url); 
+  }
+
   return 0; 
 }
 
+#else 
+static int http_set(const nuphase_asps_power_state_t state) 
+{
+  (void) state; 
+  fprintf(stderr,"Compiled without cURL support\n"); 
+  return 1;
+}
 
+static int http_update(nuphase_hk_t * hk) 
+{
+  (void) hk; 
+  fprintf(stderr,"Compiled without cURL support\n"); 
+  return 1; 
+}
+
+static int http_set_heater(int current) 
+{
+  (void) current; 
+  fprintf(stderr,"Compiled without cURL support\n"); 
+  return 1;
+}
+
+static int http_get_heater() 
+{
+  fprintf(stderr,"Compiled without cURL support\n"); 
+  return -1; 
+}
+
+
+
+#endif
 
 
 //-------------------------------------------------------
@@ -256,10 +396,10 @@ static int serial_init()
   struct termios t; //serial options
   serial_fd = open(cfg.asps_serial_device, O_RDWR ) ;  //open the file descriptor
 
-  if (!serial_fd) 
+  if (serial_fd < 0) 
   {
     fprintf(stderr,"Could not open %s\n", cfg.asps_serial_device); 
-    return 1; 
+    exit(1); 
   }
 
   //grab the current options
@@ -299,27 +439,37 @@ typedef struct
 static int serial_update(nuphase_hk_t * hk) 
 {
 
-  const char * query_string = "binhk\n"; 
+
+  const char  query_string[] = "hkbin\r"; 
   binary_hk_data data; 
   int nfails = 0; 
   if (!serial_fd) serial_init(); 
 
+  tcflush(serial_fd, TCIOFLUSH); 
+
   //If the ASPS-DAQ gets rebooted while we're querying it, we are going to get
   //a bunch of junk.  That is pretty unlikely, but it could happen . So we'll
   //try a few times
-  
   while (nfails++ < 5) 
   {
-    tcflush(serial_fd, TCIOFLUSH); 
     write(serial_fd,query_string, sizeof(query_string)-1); 
     //looks like CmdArduino echoes everything 
-    char garbage[sizeof(query_string)]; 
-    read(serial_fd, garbage, sizeof(query_string)); 
+    char garbage = '0'; 
+    while (garbage != '\n') 
+    {
+      read(serial_fd, &garbage,1); 
+    }
+
     read(serial_fd, &data, sizeof(data)); 
+    tcflush(serial_fd, TCIOFLUSH); 
 
     if ( data.magic_start != 0xe110 || data.magic_end != 0xef0f) 
     {
-      fprintf(stderr,"Didn't get right magic bytes. Will try again.\n"); 
+      fprintf(stderr,"Didn't get right magic bytes. Got: %x %x Will try again.\n", data.magic_start, data.magic_end); 
+      write(serial_fd,"\r",1); 
+      usleep(1000); 
+      tcflush(serial_fd, TCIOFLUSH); 
+      
     }
     else
     {
@@ -340,21 +490,109 @@ static int serial_update(nuphase_hk_t * hk)
   return 1; 
 }
 
+//------------------------------------------------------------------------------------------
 // set the power state using our new ctlmask command
 // TODO: If the ASPS-DAQ restarts in the middle of this, 
 //       it probably won't be able to process our message properly.
 //       
 //       We could flush before and read after to make sure that there is nothing unexpected. 
 //
+//------------------------------------------------------------------------------------------
 static int serial_set(const nuphase_asps_method_t state) 
 {
   char buf[128]; 
   //note... this mask isn't in hex right now because the ASPS-DAQ isn't expecting in hex. 
-  int len = sprintf(buf,"ctlmask %u\n", state); 
+  int len = sprintf(buf,"\rctlmask %u\r", state); 
   if (!serial_fd) serial_init(); 
-  return write(serial_fd, buf, len) != len; 
+  int written =  write(serial_fd, buf, len); 
+  tcdrain(serial_fd); 
+  return written != len; 
 }
 
+static int serial_set_heater(int current) 
+{
+  char buf[128]; 
+  int len = sprintf(buf,"\rheaterCurrent %u\r", current); 
+  if (!serial_fd) serial_init(); 
+  int written =  write(serial_fd, buf, len); 
+  tcdrain(serial_fd); 
+  return written != len; 
+}
+
+static int serial_get_heater() 
+{
+  char buf[256]; 
+  char writebuf[64]; 
+  int len = sprintf(writebuf,"heaterLine\r"); 
+  if (!serial_fd) serial_init(); 
+  tcflush(serial_fd, TCIOFLUSH); 
+  int nfails = 0; 
+  while ( nfails++ < 5) 
+  {
+    write(serial_fd, writebuf, len); 
+
+
+    //throw away the first line
+    char garbage = '0'; 
+    int pos = 0; 
+    while (garbage != '\n') read(serial_fd, &garbage,1); 
+
+    //now read in a line 
+    do 
+    {
+      read(serial_fd, &buf[pos++],1); 
+    }
+    while ( buf[pos-1] != '\n' && pos < 256); 
+
+    
+    int current = parse_string_for_current(buf); 
+
+
+    if ( current >=0) return current; 
+    else
+    {
+      fprintf(stderr,"Could not read current in string: \"%s\"\n", buf); 
+    }
+  }
+
+  fprintf(stderr,"Too many fails in get heater :(\n"); 
+  return -1; 
+}
+
+//---------------------------------------------------
+// Read in the GPIO state
+// -------------------------------------------------
+static nuphase_gpio_power_state_t query_gpio_state() 
+{
+
+  if (!gpios_are_setup) setup_gpio(); 
+  nuphase_gpio_power_state_t state = 0; 
+
+  //master is on as an input, I think
+  if (!master_fpga_ctl || bbb_gpio_get(master_fpga_ctl) )
+  {
+    state = state | NP_FPGA_POWER_MASTER; 
+  }
+  
+  //slave is on as an input, I think
+  if (!slave_fpga_ctl || bbb_gpio_get(slave_fpga_ctl) )
+  {
+    state = state | NP_FPGA_POWER_SLAVE; 
+  }
+
+
+  if (comm_ctl && bbb_gpio_get(comm_ctl) == 0)
+  {
+    state = state | NP_SPI_ENABLE; 
+  }
+
+  if (downhole_power_ctl && bbb_gpio_get(downhole_power_ctl) == 1)
+  {
+    state = state | NP_DOWNHOLE_POWER; 
+  }
+
+  return state; 
+}
 
 
 //--------------------------------------
@@ -362,7 +600,7 @@ static int serial_set(const nuphase_asps_method_t state)
 //-------------------------------------
 static float mV_to_C(float val_mV) 
 {
-  return (1858.3-val_mV)  * 0.08569; 
+  return (1858.3-2*val_mV)  * 0.08569; 
 }
 
 
@@ -372,6 +610,8 @@ static float mV_to_C(float val_mV)
 //----------------------------------------
 int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method ) 
 {
+
+  if (!already_init_hk) nuphase_hk_init(0); 
 
   /* first the ASPS-DAQ bits, using the specified method. */
 
@@ -394,13 +634,12 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
 
   /* figure out the disk space  and memory*/ 
   statvfs("/", &fs); 
-  hk->disk_space_kB = fs.f_frsize * fs.f_bavail / 1024; 
+  hk->disk_space_kB = fs.f_bsize * (fs.f_bavail >> 10) ; 
   sysinfo(&mem); 
-  hk->free_mem_kB = mem.freeram * mem.mem_unit / 1024;   //this doesn't properly take into account of cache / buffers, which would require parsing /proc/meminfo I think 
+  hk->free_mem_kB = (mem.freeram * mem.mem_unit) >> 10 ;   //this doesn't properly take into account of cache / buffers, which would require parsing /proc/meminfo I think 
 
   /* check our gpio state */ 
-  //TODO: we could actually poll these. It's possible someone else may have changed them from underneath us. 
-  hk->gpio_state = current_state  ; 
+  hk->gpio_state = query_gpio_state()  ; 
 
   //get the time
   clock_gettime(CLOCK_REALTIME_COARSE, &now); 
@@ -412,9 +651,13 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
 }
 
 
+//-----------------------------------------
 // The ASPS power state delegator 
+//-----------------------------------------
 int nuphase_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_method_t method) 
 {
+
+  if (!already_init_hk) nuphase_hk_init(0); 
 
   if (method == NP_ASPS_HTTP) 
     return http_set(st); 
@@ -422,30 +665,75 @@ int nuphase_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_met
     return serial_set(st); 
 }
 
-/** GPIO State */ 
+//-----------------------------------------
+//  GPIO State 
+//-----------------------------------------
 int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state) 
 {
+  if (!already_init_hk) nuphase_hk_init(0); 
+  if (! gpios_are_setup) setup_gpio(); 
+
 
   int ret = 0; 
-  ret += bbb_gpio_set( master_fpga_ctl, (state & NP_FPGA_POWER_MASTER)); 
-  ret += bbb_gpio_set( slave_fpga_ctl, (state & NP_FPGA_POWER_SLAVE)); 
+  ret += !master_fpga_ctl || bbb_gpio_set( master_fpga_ctl, (state & NP_FPGA_POWER_MASTER)); 
+  ret += !slave_fpga_ctl || bbb_gpio_set( slave_fpga_ctl, (state & NP_FPGA_POWER_SLAVE)); 
 
   //this one is active low
-  ret += bbb_gpio_set( comm_ctl, !(state & NP_SPI_ENABLE) ); 
+  ret += !comm_ctl || bbb_gpio_set( comm_ctl, !(state & NP_SPI_ENABLE) ); 
 
-  ret += bbb_gpio_set( downhole_power_ctl, (state & NP_DOWNHOLE_POWER) ); 
+  ret += !downhole_power_ctl || bbb_gpio_set( downhole_power_ctl, (state & NP_DOWNHOLE_POWER) ); 
 
-  current_state = state; 
   return ret; 
 }
 
+
+///////////////////////////////////////////////////////////
+//  Dispatcher for getting the current 
+///////////////////////////////////////////////////////////
+int nuphase_get_heater_current(nuphase_asps_method_t method) 
+{
+  if (!already_init_hk) nuphase_hk_init(0); 
+
+  if (method == NP_ASPS_HTTP) 
+  {
+    return http_get_heater(); 
+  }
+  else return serial_get_heater(); 
+}
+
+///////////////////////////////////////////////////////////
+//  Dispatcher for setting the current 
+//  /////////////////////////////////////////////////////////////////
+int nuphase_set_heater_current(int current, nuphase_asps_method_t method) 
+{
+  if (!already_init_hk) nuphase_hk_init(0); 
+
+  if (method == NP_ASPS_HTTP) 
+  {
+    return http_set_heater(current); 
+  }
+  else return serial_set_heater(current); 
+
+}
+
+
+
+
+
+//-----------------------------------------
+//    deinit
+//-----------------------------------------
 __attribute__((destructor)) 
 static void nuphase_hk_destroy() 
 {
   //do NOT unexport any of these!
-  bbb_gpio_close(master_fpga_ctl,0); 
-  bbb_gpio_close(slave_fpga_ctl,0); 
-  bbb_gpio_close(comm_ctl,0); 
-  bbb_gpio_close(downhole_power_ctl,0);  
+  if (master_fpga_ctl) bbb_gpio_close(master_fpga_ctl,0); 
+  if (slave_fpga_ctl) bbb_gpio_close(slave_fpga_ctl,0); 
+  if (comm_ctl) bbb_gpio_close(comm_ctl,0); 
+  if (downhole_power_ctl) bbb_gpio_close(downhole_power_ctl,0);  
 }
+
+
+
+
 

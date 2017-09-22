@@ -184,9 +184,9 @@ typedef struct nuphase_hk
   uint16_t current_frontend; 
   uint16_t current_sbc; 
   uint16_t current_switch; 
-  nuphase_asps_power_state_t on_state : 8; 
-  nuphase_asps_power_state_t fault_state : 8; 
-  nuphase_gpio_power_state_t gpio_state : 8; 
+  nuphase_asps_power_state_t on_state; 
+  nuphase_asps_power_state_t fault_state; 
+  nuphase_gpio_power_state_t gpio_state; 
   uint32_t disk_space_kB; 
   uint32_t free_mem_kB;  
 } nuphase_hk_t; 

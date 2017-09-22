@@ -1,3 +1,4 @@
+
 #include "bbb_gpio.h" 
 #include <stdio.h> 
 #include <fcntl.h> 
@@ -23,7 +24,7 @@ const char * gpio_unexport_path = "/sys/class/gpio/unexport";
 
 const char * dirstr[]  = { "in","out"}; 
 
-bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin, int value, bbb_gpio_direction_t dir) 
+bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin) 
 {
   
 
@@ -86,8 +87,6 @@ bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin, int value, bbb_gpio_direction_t di
   pin->value_fd = fd; 
   pin->dir_fd = dir_fd; 
   pin->num = gpio_pin; 
-  bbb_gpio_set(pin,value); 
-  bbb_gpio_set_direction(pin,dir); 
 
   return pin; 
 }
@@ -103,22 +102,33 @@ int bbb_gpio_pin_number(const bbb_gpio_pin_t * pin)
 int bbb_gpio_get(bbb_gpio_pin_t * pin) 
 {
   char st; 
-  if ( read(pin->value_fd, &st, 1) <0)
+  
+  if (lseek(pin->value_fd,0,SEEK_SET) ||  read(pin->value_fd, &st, 1) <0)
   {
     fprintf(stderr,"Problem reading from pin %d. errno: %d\n", pin->num, errno); 
     return -1; 
   }
 
-  return  (int) (st - '0'); 
+  return  (int) (st- '0'); 
 }
 
 
 
 int bbb_gpio_set(bbb_gpio_pin_t * pin, int state) 
 {
-  char st= '0' + !!state; 
 
-  if ( write(pin->value_fd, &st, 1) <0)
+  int ret = 0; 
+
+  if (state) 
+  {
+    ret = write(pin->dir_fd, "high", strlen("high")); 
+  }
+  else
+  {
+    ret = write(pin->dir_fd, "low", strlen("low")); 
+  }
+
+  if ( ret <0)
   {
     fprintf(stderr,"Problem writing to pin %d. errno: %d\n", pin->num, errno); 
     return -1; 
@@ -143,7 +153,7 @@ bbb_gpio_direction_t bbb_gpio_get_direction(bbb_gpio_pin_t * pin)
 {
   char letter; 
   //just read the first letter
-  if (read (pin->dir_fd, &letter, 1) < 0) 
+  if (lseek(pin->dir_fd, 0, SEEK_SET) || read (pin->dir_fd, &letter, 1) < 0) 
   {
     fprintf(stderr,"Trouble getting direction from GPIO %d\n", pin->num); 
     return -1; 
