@@ -1288,7 +1288,8 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
                                       nuphase_event_t  (*events)[NP_NUM_BUFFER])  
 {
   nuphase_buffer_mask_t mask; ; 
-  if (!nuphase_wait(d,&mask,-1,MASTER) && mask) 
+  nuphase_wait(d,&mask,-1,MASTER); 
+  if (mask) 
   {
     int ret; 
 //    printf("dev->next_read_buffer: %d, mask after waiting: %x, hw_next: %d\n",d->next_read_buffer, mask, d->hardware_next); 
