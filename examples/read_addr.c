@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <sys/time.h> 
 #include <stdlib.h>
+#include <time.h> 
 
 // read_addr spidev, buffer, start_addr, end_addr, 
 int main(int nargs, char ** args )

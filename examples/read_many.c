@@ -52,12 +52,23 @@ int main(int nargs, char ** args )
   signal(SIGINT, catch_interrupt); 
   dev =  nuphase_open(args[1],args[2],0,0); //no interrupt for now and no threadlocking
   
-  //enable phased readout 
-  nuphase_phased_trigger_readout(dev,1); 
+
+  uint32_t thresholds[NP_NUM_BEAMS]; 
+  int i = 0; 
+  for ( i = 0; i < NP_NUM_BEAMS;i++) thresholds[i] = 34000; 
+  nuphase_set_thresholds(dev, thresholds, 0); 
+
+  
 
   nuphase_set_readout_number_offset(dev,0); 
 //  nuphase_set_buffer_length(dev,127*16); 
+//enable phased readout 
+  nuphase_set_trigger_enables(dev, 0x1e, SLAVE); 
+  nuphase_set_trigger_enables(dev, 0x1f, MASTER); 
+
   nuphase_calpulse(dev,calpulse); 
+//  nuphase_phased_trigger_readout(dev,1); 
+
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
 
