@@ -126,6 +126,7 @@ typedef enum nuphase_scaler_type
   SCALER_FAST
 } nuphase_scaler_type_t; 
 
+#define NP_SCALER_TIME(type) (type==SCALER_FAST ? 1 : 10) 
 
 /** nuphase status. 
  * Holds scalers, deadtime, and maybe some other things 
