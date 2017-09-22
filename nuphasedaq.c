@@ -463,12 +463,12 @@ static int mark_buffers_done(nuphase_dev_t * d,  nuphase_buffer_mask_t buf)
 //       easy_break_point(); 
       }
 
-      if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
-      {
-        //TODO this might occasionally legimitately happen? maybe? 
-        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
-        easy_break_point(); 
-      }
+//      if ((cleared_slave[3] & 0xf) != (cleared_master[3] & 0xf))
+//      {
+//        //TODO this might occasionally legimitately happen? maybe? 
+//        fprintf(stderr," master and slave free buffers don't match!: slave: 0x%x, master: 0x%x\n", cleared_slave[3] & 0xf, cleared_master[3] & 0xf); 
+//        easy_break_point(); 
+//      }
     }
     else
     {
