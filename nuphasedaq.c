@@ -1077,7 +1077,7 @@ int nuphase_get_thresholds(nuphase_dev_t *d, uint32_t * thresholds)
     {
       thresholds[i] = thresholds_buf[i][3] & 0xff; 
       thresholds[i] = thresholds[i] |  ( (thresholds_buf[i][2] & 0xff) << 8); 
-      thresholds[i] = thresholds[i] |  ( (thresholds_buf[i][3] & 0xf) << 16); 
+      thresholds[i] = thresholds[i] |  ( (thresholds_buf[i][1] & 0xf) << 16); 
     }
   }
 
