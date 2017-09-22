@@ -1057,9 +1057,9 @@ int nuphase_set_thresholds(nuphase_dev_t *d, const uint32_t * trigger_thresholds
 int nuphase_get_thresholds(nuphase_dev_t *d, uint32_t * thresholds) 
 {
   uint8_t thresholds_buf[NP_NUM_BEAMS][NP_SPI_BYTES]; 
-  USING(d); 
   int i; 
   int ret = 0; 
+  USING(d); 
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
     ret+= append_read_register(d, MASTER, REG_THRESHOLDS+i, thresholds_buf[i]); 
@@ -1067,7 +1067,7 @@ int nuphase_get_thresholds(nuphase_dev_t *d, uint32_t * thresholds)
   ret += buffer_send(d,MASTER); 
   DONE(d); 
 
-  if (!ret) 
+  if (ret) 
   {
     memset(thresholds, 0,NP_NUM_BEAMS * sizeof(*thresholds)); 
   }
@@ -1076,8 +1076,8 @@ int nuphase_get_thresholds(nuphase_dev_t *d, uint32_t * thresholds)
     for (i = 0; i < NP_NUM_BEAMS; i++)
     {
       thresholds[i] = thresholds_buf[i][3] & 0xff; 
-      thresholds[i] = thresholds[i] |  ( ( thresholds_buf[i][2] << 8) & 0xff); 
-      thresholds[i] = thresholds[i] |  ( ( thresholds_buf[i][3] << 16) & 0xf); 
+      thresholds[i] = thresholds[i] |  ( (thresholds_buf[i][2] & 0xff) << 8); 
+      thresholds[i] = thresholds[i] |  ( (thresholds_buf[i][3] & 0xf) << 16); 
     }
   }
 
@@ -1636,7 +1636,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   ret+= buffer_send(d,which); 
   DONE(d); 
 
-  ret+= nuphase_get_thresholds(d, st->trigger_thresholds); 
+  ret+= nuphase_get_thresholds(d, &st->trigger_thresholds[0]); 
 
   if (ret) return ret; 
   st->deadtime = 0; //TODO 
@@ -1646,10 +1646,10 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   {
     uint16_t first = ((uint16_t)scaler_registers[i][3])  |  (((uint16_t) scaler_registers[i][2] & 0xf ) << 8); 
     uint16_t second =((uint16_t)(scaler_registers[i][2] >> 4)) |  (((uint16_t) scaler_registers[i][1] ) << 4); 
-    printf("%d %u %u\n", i, first, second); 
+//    printf("%d %u %u\n", i, first, second); 
 
-    int which_scaler = i / ((1 + NP_RESET_GLOBAL)/2); 
-    int which_channel = i % (( 1 + NP_RESET_GLOBAL)/2); 
+    int which_scaler = i / ((1 + NP_NUM_BEAMS)/2); 
+    int which_channel = i % (( 1 + NP_NUM_BEAMS)/2); 
 
     if (which_channel == 0) 
     {
