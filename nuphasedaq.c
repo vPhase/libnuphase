@@ -775,7 +775,9 @@ void nuphase_set_readout_number_offset(nuphase_dev_t * d, uint64_t offset)
 
 void nuphase_set_buffer_length(nuphase_dev_t * d, uint16_t length)
 {
+  USING(d); //definitely do not want to change this mid readout 
   d->buffer_length = length; 
+  DONE(d); 
 }
 
 uint16_t nuphase_get_bufferlength(const nuphase_dev_t * d) 
@@ -1741,7 +1743,6 @@ int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
    *  - clear all the buffers 
    *  - if necessary, do the calibration 
    *  - reset the event / trig time counters (and save the time to try to match it up later) 
-   *  - call nuphase_configure with the passed config. 
    *  
    
    **/
@@ -1977,9 +1978,6 @@ int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
     //take average for the start time
     d->start_time = avg_time(tbefore,tafter); 
 
-
-   //finally we must configure it the way we like it (slave first, so that we don't start triggering) 
-   //also, let's switch off the input while doing this just in case 
 
    int ret  = 0; 
 
