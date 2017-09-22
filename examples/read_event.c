@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <time.h> 
 #include <sys/time.h> 
 #include <stdlib.h>
 
