@@ -1044,6 +1044,7 @@ int nuphase_set_thresholds(nuphase_dev_t *d, const uint32_t * trigger_thresholds
   {
     if (dont & (i << i)) continue; 
     int threshold = trigger_thresholds[i] < d->min_threshold ? d->min_threshold: trigger_thresholds[i]; 
+    threshold = threshold <= 0xfffff ?  threshold : 0xfffff;
     thresholds_buf[i][0]= REG_THRESHOLDS+i ;
     thresholds_buf[i][1]= (threshold >> 16 ) & 0xf;
     thresholds_buf[i][2]= (threshold >> 8) & 0xff; 
