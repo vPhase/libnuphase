@@ -24,6 +24,7 @@
 #define SLAVE_POWER_GPIO 47
 #define COMM_GPIO 60
 #define DOWNHOLE_GPIO 66
+#define AUX_HEATER_GPIO 67 
 
 
 //---------------------------------------------------
@@ -70,6 +71,7 @@ static bbb_gpio_pin_t * master_fpga_ctl = 0;
 static bbb_gpio_pin_t * slave_fpga_ctl = 0; 
 static bbb_gpio_pin_t * comm_ctl = 0; 
 static bbb_gpio_pin_t * downhole_power_ctl = 0; 
+static bbb_gpio_pin_t * aux_heater_ctl = 0; 
 
 
 /** GPIO Setup
@@ -93,6 +95,10 @@ static int setup_gpio()
 
   downhole_power_ctl = bbb_gpio_open(DOWNHOLE_GPIO); 
   if (!downhole_power_ctl) ret+=8; 
+
+  aux_heater_ctl = bbb_gpio_open(AUX_HEATER_GPIO); 
+  if (!aux_heater_ctl) ret +=16; 
+
 
   gpios_are_setup = 1; 
   return ret;
@@ -275,7 +281,7 @@ static int http_set_heater (int current)
 
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS,postbuf); 
 
-  //might as well save the output. We could check to make sure it was successful I suppose... 
+  
   curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, save_http); 
 
   //reset http buf position
@@ -580,7 +586,7 @@ static nuphase_gpio_power_state_t query_gpio_state()
     state = state | NP_FPGA_POWER_SLAVE; 
   }
 
-
+  //active low 
   if (comm_ctl && bbb_gpio_get(comm_ctl) == 0)
   {
     state = state | NP_SPI_ENABLE; 
@@ -590,6 +596,13 @@ static nuphase_gpio_power_state_t query_gpio_state()
   {
     state = state | NP_DOWNHOLE_POWER; 
   }
+
+  // the heater is on as an input
+  if (!aux_heater_ctl || bbb_gpio_get(aux_heater_ctl) == 1)
+  {
+    state = state | NP_AUX_HEATER; 
+  }
+
 
   return state; 
 }
@@ -628,9 +641,10 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
     ret += serial_update(hk); 
   }
 
-  /* now, read in our temperatures */ 
-  hk->temp_master = mV_to_C(bbb_ain_mV(MASTER_TEMP_AIN)); 
-  hk->temp_slave = mV_to_C(bbb_ain_mV(SLAVE_TEMP_AIN)); 
+  /* now, read in our temperatures, (but only if the asps state is appropriate) */ 
+
+  hk->temp_master = (hk->on_state & NP_POWER_MASTER) ?  mV_to_C(bbb_ain_mV(MASTER_TEMP_AIN)) : -128; 
+  hk->temp_slave = (hk->on_state & NP_POWER_SLAVE) ?  mV_to_C(bbb_ain_mV(SLAVE_TEMP_AIN)) : -128; 
 
   /* figure out the disk space  and memory*/ 
   statvfs("/", &fs); 
@@ -645,7 +659,7 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
   clock_gettime(CLOCK_REALTIME_COARSE, &now); 
   hk->unixTime = now.tv_sec; 
   hk->unixTimeMillisecs = now.tv_nsec / (1000000); 
-  
+  hk->asps_heater_current = nuphase_get_asps_heater_current(method); 
   return 0; 
 
 }
@@ -668,20 +682,37 @@ int nuphase_set_asps_power_state(nuphase_asps_power_state_t st, nuphase_asps_met
 //-----------------------------------------
 //  GPIO State 
 //-----------------------------------------
-int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state) 
+int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state, nuphase_gpio_power_state_t mask) 
 {
-  if (!already_init_hk) nuphase_hk_init(0); 
   if (! gpios_are_setup) setup_gpio(); 
 
-
   int ret = 0; 
-  ret += !master_fpga_ctl || bbb_gpio_set( master_fpga_ctl, (state & NP_FPGA_POWER_MASTER)); 
-  ret += !slave_fpga_ctl || bbb_gpio_set( slave_fpga_ctl, (state & NP_FPGA_POWER_SLAVE)); 
 
-  //this one is active low
-  ret += !comm_ctl || bbb_gpio_set( comm_ctl, !(state & NP_SPI_ENABLE) ); 
+  if (mask & NP_FPGA_POWER_MASTER) 
+  {
+    ret += !master_fpga_ctl || bbb_gpio_set( master_fpga_ctl, (state & NP_FPGA_POWER_MASTER)); 
+  }
 
-  ret += !downhole_power_ctl || bbb_gpio_set( downhole_power_ctl, (state & NP_DOWNHOLE_POWER) ); 
+  if (mask & NP_FPGA_POWER_SLAVE) 
+  {
+    ret += !slave_fpga_ctl  || bbb_gpio_set( slave_fpga_ctl, (state & NP_FPGA_POWER_SLAVE)); 
+  }
+
+  if (mask & NP_SPI_ENABLE) 
+  {
+    //this one is active low
+    ret += !comm_ctl || bbb_gpio_set( comm_ctl, !(state & NP_SPI_ENABLE) ); 
+  }
+
+  if ( mask & NP_DOWNHOLE_POWER) 
+  {
+    ret += !downhole_power_ctl || bbb_gpio_set( downhole_power_ctl, (state & NP_DOWNHOLE_POWER) ); 
+  }
+
+  if ( mask & NP_AUX_HEATER) 
+  {
+    ret += !aux_heater_ctl || bbb_gpio_set (aux_heater_ctl, state & NP_AUX_HEATER); 
+  }
 
   return ret; 
 }
@@ -690,7 +721,7 @@ int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state)
 ///////////////////////////////////////////////////////////
 //  Dispatcher for getting the current 
 ///////////////////////////////////////////////////////////
-int nuphase_get_heater_current(nuphase_asps_method_t method) 
+int nuphase_get_asps_heater_current(nuphase_asps_method_t method) 
 {
   if (!already_init_hk) nuphase_hk_init(0); 
 
@@ -704,7 +735,7 @@ int nuphase_get_heater_current(nuphase_asps_method_t method)
 ///////////////////////////////////////////////////////////
 //  Dispatcher for setting the current 
 //  /////////////////////////////////////////////////////////////////
-int nuphase_set_heater_current(int current, nuphase_asps_method_t method) 
+int nuphase_set_asps_heater_current(int current, nuphase_asps_method_t method) 
 {
   if (!already_init_hk) nuphase_hk_init(0); 
 
@@ -731,6 +762,7 @@ static void nuphase_hk_destroy()
   if (slave_fpga_ctl) bbb_gpio_close(slave_fpga_ctl,0); 
   if (comm_ctl) bbb_gpio_close(comm_ctl,0); 
   if (downhole_power_ctl) bbb_gpio_close(downhole_power_ctl,0);  
+  if (aux_heater_ctl) bbb_gpio_close(aux_heater_ctl,0);  
 }
 
 

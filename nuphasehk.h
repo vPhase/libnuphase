@@ -52,16 +52,21 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method);
 /** Set the ASPS power state, using the chosen method. These are all the power switches controlled by the ASPS-DAQ */ 
 int nuphase_set_asps_power_state ( nuphase_asps_power_state_t state, nuphase_asps_method_t method); 
 
-/** Set the GPIO power state. For the FPGA's to be on, the relevant ASPS power state must also be enabled */ 
-int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state); 
-
+/** Set the GPIO power state. For the FPGA's to be on, the relevant ASPS power state must also be enabled
+ * Note that even for things with inverted state (active low instead of active high), you should use the 
+ * logical state here. 
+ *
+ * The mask allows you to only set some of the pins (and leave the others unchanged) 
+ **/ 
+int nuphase_set_gpio_power_state ( nuphase_gpio_power_state_t state, nuphase_gpio_power_state_t mask); 
 
 /* Gets the pid goal of the heater via the method */ 
-int nuphase_get_heater_current(nuphase_asps_method_t method); 
+int nuphase_get_asps_heater_current(nuphase_asps_method_t method); 
 
 /* Sets the pid goal of the heater using the method. Note that the heater on after end time
  * might set this from underneath us */ 
-int nuphase_set_heater_current(int current_mA, nuphase_asps_method_t method); 
+int nuphase_set_asps_heater_current(int current_mA, nuphase_asps_method_t method); 
+
 
 
 #endif

@@ -775,6 +775,8 @@ int nuphase_hk_print(FILE * f, const nuphase_hk_t *hk)
   fprintf(f,"      SLAVE_FPGA :  %s \n", ( (hk->gpio_state & NP_FPGA_POWER_SLAVE) && ( hk->on_state & NP_POWER_SLAVE) )  ? "ON ":"OFF"); 
   fprintf(f,"      SPI        :  %s \n", (hk->gpio_state & NP_SPI_ENABLE)   ? "ON ":"OFF"); 
   fprintf(f,"      DOWNHOLE   :  %s \n", (hk->gpio_state & NP_DOWNHOLE_POWER)   ? "ON ":"OFF"); 
+  fprintf(f,"      AUX_HEATER :  %s \n", (hk->gpio_state & NP_AUX_HEATER)   ? "ON ":"OFF"); 
+  fprintf(f,"  ASPS_HEATER_CURRENT: %d mA\n", hk->asps_heater_current); 
   fprintf(f,"  SBC: \n"); 
   fprintf(f,"     DISK SPACE: %0.3g MB \n", hk->disk_space_kB /1024.);  
   fprintf(f,"     FREE MEM  : %0.3g MB \n", hk->free_mem_kB   /1024.);  

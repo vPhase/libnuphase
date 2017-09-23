@@ -155,8 +155,9 @@ typedef enum nuphase_asps_power_state
 
 } nuphase_asps_power_state_t; 
 
-
 #define ASPS_ALL 0x1f
+#define ASPS_MINIMAL 0x12
+
 
 /* Power state of FPGA (the board can be on but the FPGA off) */ 
 typedef enum nuphase_gpio_power_state
@@ -164,11 +165,13 @@ typedef enum nuphase_gpio_power_state
   NP_FPGA_POWER_MASTER = 1, 
   NP_FPGA_POWER_SLAVE = 2,
   NP_SPI_ENABLE = 4,
-  NP_DOWNHOLE_POWER= 8
+  NP_DOWNHOLE_POWER= 8 , 
+  NP_AUX_HEATER=16 
 
 } nuphase_gpio_power_state_t; 
 
-#define GPIO_ALL 0xf
+#define GPIO_FPGA_ALL 0x7 
+#define GPIO_ALL 0x1f
 
 
 typedef struct nuphase_hk
@@ -189,6 +192,7 @@ typedef struct nuphase_hk
   nuphase_gpio_power_state_t gpio_state; 
   uint32_t disk_space_kB; 
   uint32_t free_mem_kB;  
+  uint16_t asps_heater_current; 
 } nuphase_hk_t; 
 
 
