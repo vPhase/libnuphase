@@ -14,6 +14,11 @@ endif
 #uncomment to enable excessive printouts
 #CFLAGS+=-DDEBUG_PRINTOUTS
 
+#uncomment to enable serial interception. This changes the default
+# asps serial port from /dev/ttyUSB0 to /tmp/interceptty 
+#CFLAGS+=-DDEBUG_SERIAL 
+
+
 PREFIX=/usr/local/ 
 LIBDIR=lib 
 
@@ -36,7 +41,6 @@ libnuphase.so: $(OBJS) $(HEADERS)
 
 libnuphasedaq.so: $(DAQ_OBJS) $(DAQ_HEADERS) libnuphase.so 
 	$(CC) $(LDFLAGS) $(DAQ_LDFLAGS) -shared $(DAQ_OBJS) -o $@ 
-
 
 install-doc:
 	install -d $(PREFIX)/$(SHARE) 

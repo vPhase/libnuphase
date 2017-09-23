@@ -109,7 +109,11 @@ static int setup_gpio()
 //------------------------------------------------------
 void nuphase_hk_settings_init(nuphase_hk_settings_t * settings) 
 {
+#ifdef DEBUG_SERIAL 
+  settings->asps_serial_device = "/tmp/interceptty"; 
+#else
   settings->asps_serial_device = "/dev/ttyUSB0"; 
+#endif
   settings->asps_address = "asps-daq";  // this can be defined, for example, in /etc/hosts
 }
 
