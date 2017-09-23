@@ -157,6 +157,7 @@ typedef enum nuphase_asps_power_state
 
 #define ASPS_ALL 0x1f
 #define ASPS_MINIMAL 0x12
+#define ASPS_FPGAS  0xc 
 
 
 /* Power state of FPGA (the board can be on but the FPGA off) */ 
