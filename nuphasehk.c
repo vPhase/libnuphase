@@ -6,7 +6,6 @@
 #include <stdio.h> 
 #include <sys/statvfs.h> 
 #include <stdlib.h>
-#include <sys/sysinfo.h> 
 #include <termios.h> 
 #include <unistd.h> 
 #include <string.h> 
@@ -618,6 +617,26 @@ static float mV_to_C(float val_mV)
 
 
 
+static uint32_t get_free_kB()
+{
+  char bitbucket[256]; 
+  FILE * meminfo = fopen("/proc/meminfo","r"); 
+  uint32_t available = 0; 
+
+  //eat first line
+  fgets(bitbucket, 256, meminfo); 
+  //eat second line
+  fgets(bitbucket, 256, meminfo); 
+
+
+  fscanf(meminfo, "MemAvailable: %u kB", &available); 
+
+  fclose(meminfo); 
+
+  return available; 
+}
+
+
 //----------------------------------------
 //The main hk update method 
 //----------------------------------------
@@ -630,7 +649,6 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
 
   struct timespec now; 
   struct statvfs fs; 
-  struct sysinfo mem; 
   int ret = 0;
   if (method == NP_ASPS_HTTP) 
   {
@@ -649,8 +667,7 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
   /* figure out the disk space  and memory*/ 
   statvfs("/", &fs); 
   hk->disk_space_kB = fs.f_bsize * (fs.f_bavail >> 10) ; 
-  sysinfo(&mem); 
-  hk->free_mem_kB = (mem.freeram * mem.mem_unit) >> 10 ;   //this doesn't properly take into account of cache / buffers, which would require parsing /proc/meminfo I think 
+  hk->free_mem_kB = get_free_kB(); 
 
   /* check our gpio state */ 
   hk->gpio_state = query_gpio_state()  ; 
