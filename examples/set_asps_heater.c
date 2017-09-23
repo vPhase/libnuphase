@@ -21,9 +21,9 @@ int main(int nargs, char ** args)
   }
 
 
-  nuphase_set_heater_current(current, use_http ? NP_ASPS_HTTP : NP_ASPS_SERIAL); 
+  nuphase_set_asps_heater_current(current, use_http ? NP_ASPS_HTTP : NP_ASPS_SERIAL); 
   sleep(1); 
-  printf("After setting, current from %s: %d\n", use_http ? "HTTP" : "SERIAL", nuphase_get_heater_current(use_http ? NP_ASPS_HTTP : NP_ASPS_SERIAL)); 
+  printf("After setting, current from %s: %d\n", use_http ? "HTTP" : "SERIAL", nuphase_get_asps_heater_current(use_http ? NP_ASPS_HTTP : NP_ASPS_SERIAL)); 
 
   return 0; 
 }

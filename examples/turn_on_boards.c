@@ -16,7 +16,7 @@ int main(int nargs, char ** args)
   nuphase_set_asps_power_state(asps, method); 
   sleep(1); 
   nuphase_gpio_power_state_t gpio = NP_FPGA_POWER_MASTER | NP_FPGA_POWER_SLAVE | NP_SPI_ENABLE; 
-  nuphase_set_gpio_power_state(gpio); 
+  nuphase_set_gpio_power_state(gpio,gpio); 
 
   sleep(1); 
   printf("After turn on: \n"); 

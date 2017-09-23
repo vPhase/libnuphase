@@ -12,8 +12,7 @@ int main(int nargs, char ** args)
   printf("Before Turn off: \n"); 
   nuphase_hk_print(stdout,&hk); 
 
-  nuphase_gpio_power_state_t gpio = 0; ; 
-  nuphase_set_gpio_power_state(gpio); 
+  nuphase_set_gpio_power_state(0,GPIO_FPGA_ALL); 
 
   printf("after gpio change: \n"); 
   sleep(1); 
