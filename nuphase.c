@@ -761,8 +761,23 @@ int nuphase_hk_print(FILE * f, const nuphase_hk_t *hk)
   strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
   fprintf(f,"NuPhase HK (at %s.%03d UTC)\n", timstr, hk->unixTimeMillisecs); 
   fprintf(f,"  Temperatures: \n"); 
-  fprintf(f,"      MASTER:  %d C\n", hk->temp_master); 
-  fprintf(f,"      SLAVE :  %d C\n", hk->temp_slave); 
+  if (hk->temp_master > -128)
+  {
+    fprintf(f,"      MASTER:  %d C\n", hk->temp_master); 
+  }
+  else
+  {
+    fprintf(f,"      MASTER: sensor off\n"); 
+  }
+
+  if (hk->temp_slave > -128)
+  {
+    fprintf(f,"      SLAVE :  %d C\n", hk->temp_slave); 
+  }
+  else
+  {
+    fprintf(f,"      SLAVE: sensor off\n"); 
+  }
   fprintf(f,"      CASE  :  %d C\n", hk->temp_case); 
   fprintf(f,"      ASPSuC:  %d C\n", hk->temp_asps_uc); 
   fprintf(f,"  Power: \n"); 
@@ -776,7 +791,7 @@ int nuphase_hk_print(FILE * f, const nuphase_hk_t *hk)
   fprintf(f,"      SPI        :  %s \n", (hk->gpio_state & NP_SPI_ENABLE)   ? "ON ":"OFF"); 
   fprintf(f,"      DOWNHOLE   :  %s \n", (hk->gpio_state & NP_DOWNHOLE_POWER)   ? "ON ":"OFF"); 
   fprintf(f,"      AUX_HEATER :  %s \n", (hk->gpio_state & NP_AUX_HEATER)   ? "ON ":"OFF"); 
-  fprintf(f,"  ASPS_HEATER_CURRENT: %d mA\n", hk->asps_heater_current); 
+  fprintf(f,"      ASPS_HEATER:  %s (%d mA)\n", hk->asps_heater_current ? " ON" : "OFF", hk->asps_heater_current); 
   fprintf(f,"  SBC: \n"); 
   fprintf(f,"     DISK SPACE: %0.3g MB \n", hk->disk_space_kB /1024.);  
   fprintf(f,"     FREE MEM  : %0.3g MB \n", hk->free_mem_kB   /1024.);  
