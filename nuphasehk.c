@@ -10,6 +10,7 @@
 #include <unistd.h> 
 #include <string.h> 
 #include <fcntl.h> 
+#include <sys/ioctl.h> 
 
 #ifdef WITH_CURL 
 #include <curl/curl.h> 
@@ -426,7 +427,48 @@ static void serial_destroy()
     close(serial_fd); 
 }
 
+/* This waits for our serial prompt in a way that is hopefully reliable. 
+ * 
+ */ 
+static int wait_for_serial_prompt()
+{
+  const char expected[] = "ADAQ> "; 
+  char checkbuf[sizeof(expected)]; 
+  unsigned navail = 0; 
+  unsigned nwanted = sizeof(expected) - 1; 
+  checkbuf[nwanted] = 0;
 
+  while(1) 
+  {
+    usleep(10000); 
+    ioctl(serial_fd, FIONREAD, &navail); 
+
+    if (navail < nwanted)
+    {
+      write(serial_fd,"\r",1); 
+      usleep(10000); 
+      continue; 
+    }
+
+    while (navail > nwanted)
+    {
+      char junk[navail - nwanted]; 
+      read(serial_fd, &junk,navail-nwanted); 
+      ioctl(serial_fd, FIONREAD, &navail); 
+    }
+
+    read(serial_fd,checkbuf,nwanted); 
+    if (memcmp(checkbuf,expected,nwanted) ==0)
+    {
+      return 0; 
+    }
+  }
+
+}
+
+
+
+/** Struct matching what the ASPS-DAQ produces */ 
 typedef struct
 {
   uint16_t magic_start;
@@ -454,8 +496,8 @@ static int serial_update(nuphase_hk_t * hk)
   int nfails = 0; 
   if (!serial_fd) serial_init(); 
 
-  tcflush(serial_fd, TCIOFLUSH); 
 
+  wait_for_serial_prompt(); 
   //If the ASPS-DAQ gets rebooted while we're querying it, we are going to get
   //a bunch of junk.  That is pretty unlikely, but it could happen . So we'll
   //try a few times
@@ -470,13 +512,12 @@ static int serial_update(nuphase_hk_t * hk)
     }
 
     read(serial_fd, &data, sizeof(data)); 
-    tcflush(serial_fd, TCIOFLUSH); 
 
     if ( data.magic_start != 0xe110 || data.magic_end != 0xef0f) 
     {
       fprintf(stderr,"Didn't get right magic bytes. Got: %x %x Will try again.\n", data.magic_start, data.magic_end); 
       write(serial_fd,"\r",1); 
-      usleep(1000); 
+      usleep(10000); 
       tcflush(serial_fd, TCIOFLUSH); 
       
     }
@@ -499,6 +540,7 @@ static int serial_update(nuphase_hk_t * hk)
   return 1; 
 }
 
+
 //------------------------------------------------------------------------------------------
 // set the power state using our new ctlmask command
 // TODO: If the ASPS-DAQ restarts in the middle of this, 
@@ -511,8 +553,9 @@ static int serial_set(const nuphase_asps_method_t state)
 {
   char buf[128]; 
   //note... this mask isn't in hex right now because the ASPS-DAQ isn't expecting in hex. 
-  int len = sprintf(buf,"\rctlmask %u\r", state); 
+  int len = sprintf(buf,"ctlmask %u\r", state); 
   if (!serial_fd) serial_init(); 
+  wait_for_serial_prompt(); 
   int written =  write(serial_fd, buf, len); 
   tcdrain(serial_fd); 
   return written != len; 
@@ -521,8 +564,9 @@ static int serial_set(const nuphase_asps_method_t state)
 static int serial_set_heater(int current) 
 {
   char buf[128]; 
-  int len = sprintf(buf,"\rheaterCurrent %u\r", current); 
+  int len = sprintf(buf,"heaterCurrent %u 1\r", current); 
   if (!serial_fd) serial_init(); 
+  wait_for_serial_prompt(); 
   int written =  write(serial_fd, buf, len); 
   tcdrain(serial_fd); 
   return written != len; 
@@ -534,7 +578,7 @@ static int serial_get_heater()
   char writebuf[64]; 
   int len = sprintf(writebuf,"heaterLine\r"); 
   if (!serial_fd) serial_init(); 
-  tcflush(serial_fd, TCIOFLUSH); 
+  wait_for_serial_prompt(); 
   int nfails = 0; 
   while ( nfails++ < 5) 
   {
@@ -561,6 +605,9 @@ static int serial_get_heater()
     else
     {
       fprintf(stderr,"Could not read current in string: \"%s\"\n", buf); 
+      write(serial_fd,"\r",1); 
+      usleep(10000); 
+      tcflush(serial_fd, TCIOFLUSH); 
     }
   }
 
