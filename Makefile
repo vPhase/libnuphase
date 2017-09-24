@@ -1,22 +1,37 @@
+### Some settings one might reasonably want to change
+
+#this is only needed on the DAQ really 
+ENABLE_CURL=1
+
+# if set, will by default use /tmp/intercepttty insead of /dev/ttyUSB0 as the serial device
+SERIAL_DEBUG=0
+
+# set  this if you want to see SPI transactions in gory detail 
+SPI_DEBUG=0
+
+
 CC=gcc
 LD=gcc
+
+#I'm lazy and using implicit rules for now, which means everything gets the same cflags
 CFLAGS+=-fPIC -g -Wall -Wextra  -D_GNU_SOURCE
 LDFLAGS+= -lz -g
 
-ENABLE_CURL=1
-
 DAQ_LDFLAGS+= -lpthread -L./ -lnuphase -g 
+
+
 ifeq ($(ENABLE_CURL),1) 
-	CFLAGS+=-DWITH_CURL 
+	CFLAGS+=-DWITH_CURL
 	DAQ_LDFLAGS+= `curl-config --libs`
 endif
 
-#uncomment to enable excessive printouts
-#CFLAGS+=-DDEBUG_PRINTOUTS
+ifeq ($(SPI_DEBUG),1)
+	CFLAGS+=-DDEBUG_PRINTOUTS
+endif
 
-#uncomment to enable serial interception. This changes the default
-# asps serial port from /dev/ttyUSB0 to /tmp/interceptty 
-#CFLAGS+=-DDEBUG_SERIAL 
+ifeq ($(SERIAL_DEBUG),1)
+	CFLAGS+=-DDEBUG_SERIAL 
+endif
 
 
 PREFIX=/usr/local/ 
