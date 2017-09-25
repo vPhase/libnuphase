@@ -311,6 +311,7 @@ void fillBuffers()
 static void setup_xfers( nuphase_dev_t *d)
 {
   int i, b; 
+  USING(d); 
   for (b = 0; b < NBD(d); b++)
   {
     for (i = 0; i < MAX_XFERS; i++)
@@ -320,6 +321,7 @@ static void setup_xfers( nuphase_dev_t *d)
       d->buf[b][i].delay_usecs = d->delay_us;//? 
     }
   }
+  DONE(d); 
 }
 
 
