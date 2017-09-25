@@ -105,8 +105,6 @@ typedef enum nuphase_reset_type
  * the readout number is set to unixtime << 32. They can be set to something
  * better using nuphase_set_board_id, nuphase_set_buffer_length and nuphase_set_readout_number_offset.
  *
- * The default nuphase_config_t is also sent on startup. Changes can be made
- * using nuphase_configure. 
  *
  * The access to the SPI file descriptor is locked when opening, so only one
  * process can hold it. 

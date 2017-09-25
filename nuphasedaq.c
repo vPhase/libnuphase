@@ -228,7 +228,7 @@ static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_reset_buf[NP_SPI_BYTES] = {REG_CLEAR,0,1,0};
-static uint8_t buf_pick_scaler[NP_NUM_BEAMS][N_SCALER_REGISTERS]; 
+static uint8_t buf_pick_scaler[N_SCALER_REGISTERS][NP_SPI_BYTES]; 
 
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
 
