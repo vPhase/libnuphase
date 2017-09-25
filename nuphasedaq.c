@@ -575,6 +575,13 @@ int nuphase_read_register(nuphase_dev_t * d, uint8_t address, uint8_t *result, n
   ret =  append_read_register(d,which, address,result); 
   ret += buffer_send(d,which); 
   DONE(d);
+
+  if ( result[0] != address) 
+  {
+    fprintf(stderr,"WARNING: read register mismatch. Expected 0x%x, got 0x%x\n", address, result[0]); 
+    ret++; 
+  }
+
   return ret; 
 }
 
