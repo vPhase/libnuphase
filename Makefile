@@ -14,7 +14,7 @@ CC=gcc
 LD=gcc
 
 #I'm lazy and using implicit rules for now, which means everything gets the same cflags
-CFLAGS+=-fPIC -g -Wall -Wextra  -D_GNU_SOURCE
+CFLAGS+=-fPIC -g -Wall -Wextra  -D_GNU_SOURCE -O2
 LDFLAGS+= -lz -g
 
 DAQ_LDFLAGS+= -lpthread -L./ -lnuphase -g 
