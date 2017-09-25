@@ -392,5 +392,7 @@ uint8_t nuphase_get_pretrigger(const nuphase_dev_t *d);
 /** Set the external output config */ 
 int nuphase_configure_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_config_t config); 
 
+/** get the external output config */ 
+int nuphase_get_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_config_t * config); 
 
 #endif

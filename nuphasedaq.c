@@ -2035,6 +2035,21 @@ int nuphase_set_transaction_delay(nuphase_dev_t *d, unsigned delay)
 }
 
 
+int nuphase_get_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_config_t * config) 
+{
+
+  uint8_t cfg_buf[NP_SPI_BYTES]; 
+  int ret = nuphase_read_register(d, REG_EXT_TRIG_CONFIG, cfg_buf, MASTER); 
+  
+  config->width = cfg_buf[2]; 
+  config->enable = cfg_buf[3] & 1; 
+  config->polarity = (cfg_buf[3] >> 1)  & 1; 
+  config->extin_to_extout = (cfg_buf[3] >> 2)  & 1; 
+
+  return ret; 
+}
+
+
 int nuphase_configure_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_config_t config) 
 {
   uint8_t cfg_buf[NP_SPI_BYTES] = { REG_EXT_TRIG_CONFIG,0, config.width,
