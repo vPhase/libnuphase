@@ -1793,7 +1793,7 @@ int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
   d->next_read_buffer = 0; 
 
   //do the calibration, if necessary 
-  
+  // THIS IS NOT FULLY WORKING YET FOR NOW WE WILL USE ERIC'S align_adcs.py 
   /* The calibration proceeds as follows:
    *   - temporarily set the channel length to something long 
    *   - enable the calpulser 
