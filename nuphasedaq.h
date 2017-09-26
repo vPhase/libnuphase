@@ -354,9 +354,8 @@ int nuphase_get_attenuation(nuphase_dev_t * d, uint8_t * attenuation_master, uin
 
 
 /** Sets the channels used to form the trigger.
- * 8 LSB's for master, then for slave .
  * */ 
-int nuphase_set_channel_mask(nuphase_dev_t * d, uint16_t channel_mask); 
+int nuphase_set_channel_mask(nuphase_dev_t * d, uint8_t channel_mask); 
 
 /** Gets the channels used to form the trigger.
  * 8 LSB's for master, then for slave .

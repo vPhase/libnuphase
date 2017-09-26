@@ -976,33 +976,18 @@ uint8_t nuphase_get_pretrigger(const nuphase_dev_t * d)
 
 
 
-int nuphase_set_channel_mask(nuphase_dev_t * d, uint16_t mask) 
+int nuphase_set_channel_mask(nuphase_dev_t * d, uint8_t mask) 
 
 {
     uint8_t channel_mask_buf_master[NP_SPI_BYTES]= { REG_CHANNEL_MASK, 0, 0, mask & 0xff}; 
 
     USING(d); 
     int written = do_write(d->fd[MASTER], channel_mask_buf_master); 
-    if (written!= NP_SPI_BYTES)
-    {
-      DONE(d); 
-      return -1; 
-    }
-
-    if (d->fd[SLAVE]) 
-    {
-      uint8_t channel_mask_buf_slave[NP_SPI_BYTES]=  { REG_CHANNEL_MASK, 0, 0, (mask >> 8) & 0xff}; 
-      written = do_write(d->fd[SLAVE], channel_mask_buf_slave); 
-      if (written!= NP_SPI_BYTES) 
-      {
-        DONE(d); 
-        return -1; 
-      }
-    }
-
     DONE(d); 
-    return 0; 
+
+    return written != NP_SPI_BYTES; 
 }
+
 
 uint16_t nuphase_get_channel_mask(nuphase_dev_t* d) 
 {
