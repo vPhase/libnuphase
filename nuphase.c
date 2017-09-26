@@ -101,17 +101,32 @@ static int packet_start_read( struct generic_file gf, struct packet_start * star
   if (got != sizeof(start->magic)) return NP_ERR_NOT_ENOUGH_BYTES; 
 
   if (start->magic != expected_magic)
+  {
+    fprintf(stderr,"Bad magic byte. Expected 0x%x, got 0x%x\n", expected_magic, start->magic); 
     return NP_ERR_WRONG_TYPE; 
+  }
+
 
   got = generic_read(gf, sizeof(start->ver), &start->ver); 
-  if (got != sizeof(start->ver)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  if (got != sizeof(start->ver)) 
+  {
+    fprintf(stderr,"Did not get enough start bytes\n"); 
+    return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
 
   if (start->ver > maximum_version) 
+  {
+    fprintf(stderr,"Version %d exceeds maximum %d\n", start->ver , maximum_version); 
     return NP_ERR_BAD_VERSION; 
+  }
 
   got = generic_read(gf,sizeof(start->cksum), &start->cksum); 
 
-  if (got != sizeof(start->cksum)) return NP_ERR_NOT_ENOUGH_BYTES; 
+  if (got != sizeof(start->cksum))
+  {
+    fprintf(stderr,"Did not get enough checksum bytes\n"); 
+    return NP_ERR_NOT_ENOUGH_BYTES; 
+  }
 
   return 0; 
 }
@@ -464,7 +479,7 @@ static int nuphase_status_generic_read(struct generic_file gf, nuphase_status_t 
   uint16_t cksum; 
 
   got = packet_start_read(gf, &start, NUPHASE_STATUS_MAGIC, NUPHASE_STATUS_VERSION); 
-  if (!got) return got; 
+  if (got) return got; 
 
   switch(start.ver) 
   {
@@ -523,7 +538,7 @@ static int nuphase_hk_generic_read(struct generic_file gf, nuphase_hk_t *hk)
   uint16_t cksum; 
 
   got = packet_start_read(gf, &start, NUPHASE_HK_MAGIC, NUPHASE_HK_VERSION); 
-  if (!got) return got; 
+  if (got) return got; 
 
   switch(start.ver) 
   {
