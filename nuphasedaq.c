@@ -887,7 +887,7 @@ int nuphase_close(nuphase_dev_t * d)
 
 void nuphase_cancel_wait(nuphase_dev_t *d) 
 {
-  d->cancel_wait = 1;  //this is necessary for polling and will sometimes catch the interrupt as well
+  d->cancel_wait = 1;  
 }
 
 int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float timeout, nuphase_which_board_t which) 
@@ -916,6 +916,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
   if (d->cancel_wait) 
   {
     d->cancel_wait = 0; 
+    if (d->enable_locking) pthread_mutex_unlock(&d->wait_mut);   //unlock the mutex
     return EAGAIN; 
   }
 
