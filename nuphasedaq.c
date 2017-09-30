@@ -37,7 +37,6 @@
 #define NP_DELAY_USECS 0
 #define NP_CS_CHANGE 0
 
-#define POLL_USLEEP 500
 #define SPI_CLOCK 20000000
 //#define SPI_CLOCK 1000000
 
@@ -135,6 +134,7 @@ struct nuphase_dev
   uint8_t hardware_next; // what buffer the hardware things we should read next 
 
   uint32_t min_threshold; 
+  uint16_t poll_interval; 
   int spi_clock; 
   int cs_change; 
   int delay_us; 
@@ -690,6 +690,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
 
 
   dev = malloc(sizeof(nuphase_dev_t)); 
+  dev->poll_interval = 500; 
   memset(dev,0,sizeof(*dev)); 
   dev->gpio_pin = gpio_pin; 
   dev->device_name[0] = devicename_master; 
@@ -923,15 +924,36 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 
 
   nuphase_buffer_mask_t something = 0; 
-  float waited = 0; 
+  struct timespec start; 
+  if (timeout >0) clock_gettime(CLOCK_MONOTONIC, &start); 
 
+  float waited = 0; 
   // keep trying until we either get something, are cancelled, or exceed our timeout (if we have a timeout) 
   while(!something && (timeout <= 0 || waited < timeout))
   {
-      if (d->cancel_wait) break; 
-      usleep(POLL_USLEEP); 
-      waited += POLL_USLEEP * 1e-6; //us to s 
+
       something = nuphase_check_buffers(d,&d->hardware_next,which); 
+
+      if (d->cancel_wait) break; 
+      if (!something)
+      {
+
+        if(d->poll_interval)
+        {
+          usleep(d->poll_interval); 
+        }
+        else
+        {
+          sched_yield();
+        }
+
+        if (timeout >0)
+        {
+          struct timespec now; 
+          clock_gettime(CLOCK_REALTIME, &now); 
+          waited = (now.tv_sec - start.tv_nsec) * 1e-9f  * (now.tv_nsec - start.tv_nsec); 
+        }
+      }
   }
   int interrupted = d->cancel_wait; //were we interrupted? 
 
@@ -2049,5 +2071,10 @@ int nuphase_configure_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_co
   return written != NP_SPI_BYTES; 
 }
 
+int nuphase_set_poll_interval(nuphase_dev_t * d, uint16_t interval)
+{
+  d->poll_interval = interval ;
+  return 0; 
+}
 
 

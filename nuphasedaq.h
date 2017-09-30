@@ -392,4 +392,8 @@ int nuphase_configure_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_c
 /** get the external output config */ 
 int nuphase_get_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_config_t * config); 
 
+
+/** The poll interval for waiting, in us. If 0, will just do a sched_yield */ 
+int nuphase_set_poll_interval(nuphase_dev_t *, unsigned short us); 
+
 #endif
