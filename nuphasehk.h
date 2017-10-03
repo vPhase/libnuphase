@@ -67,6 +67,8 @@ int nuphase_get_asps_heater_current(nuphase_asps_method_t method);
  * might set this from underneath us */ 
 int nuphase_set_asps_heater_current(int current_mA, nuphase_asps_method_t method); 
 
+/** Reboots the FPGA's via the gpio's */
+int nuphase_reboot_fpga_power(int sleep_after_off, int sleep_after_slave_on, int sleep_after_master_on); 
 
 
 #endif

@@ -815,8 +815,29 @@ int nuphase_set_asps_heater_current(int current, nuphase_asps_method_t method)
 
 }
 
+/** Sleep that resumes when interrupted by a signal */ 
+static void smart_sleep(int amount) 
+{
+  while(amount) amount = sleep(amount);
+}
 
+///////////////////////////////////////////
+////  FPGA reboot
+////////////////////////////////////////////
+int nuphase_reboot_fpga_power(int sleep_after_off, int sleep_after_slave_on, int sleep_after_master_on)
+{
+  if (!gpios_are_setup) setup_gpio(); 
 
+  int ret = 0; 
+  ret+=bbb_gpio_set(slave_fpga_ctl, 0); 
+  ret+=bbb_gpio_set(master_fpga_ctl, 0); 
+  smart_sleep(sleep_after_off); 
+  ret+=bbb_gpio_set(slave_fpga_ctl, 1); 
+  smart_sleep(sleep_after_slave_on); 
+  ret+=bbb_gpio_set(master_fpga_ctl, 1); 
+  smart_sleep(sleep_after_master_on); 
+  return ret; 
+}
 
 
 //-----------------------------------------
