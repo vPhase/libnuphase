@@ -24,6 +24,9 @@ const char * gpio_unexport_path = "/sys/class/gpio/unexport";
 
 const char * dirstr[]  = { "in","out"}; 
 
+#define LOCK_GPIO_ACCESS 0 
+
+
 bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin) 
 {
   
@@ -71,6 +74,7 @@ bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin)
 
   }
 
+#ifdef LOCK_GPIO_ACCESS
   //lock access to prevent more than one program talking to it at a time
   // this only works with other programs using flock... so the python based stuff I assume won't work (unless we modify it to flock) 
   if (flock(fd, LOCK_EX | LOCK_NB) || flock(dir_fd, LOCK_EX | LOCK_NB)) 
@@ -81,6 +85,7 @@ bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin)
 
     return 0; 
   }
+#endif
 
   bbb_gpio_pin_t * pin = malloc(sizeof(bbb_gpio_pin_t)); 
 
@@ -164,9 +169,12 @@ bbb_gpio_direction_t bbb_gpio_get_direction(bbb_gpio_pin_t * pin)
 
 int bbb_gpio_close(bbb_gpio_pin_t * pin, int unexport)
 {
+#ifdef LOCK_GPIO_ACCESS
   //unlock 
   flock(pin->dir_fd, LOCK_UN); 
   flock(pin->value_fd, LOCK_UN); 
+#endif 
+
   //close file descriptor 
   close(pin->value_fd); 
   close(pin->dir_fd); 
