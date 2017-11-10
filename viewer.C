@@ -22,16 +22,16 @@ TGraph * makeGraph(const nuphase_event_t * ev, int ibd = 0, int ch = 0)
 void viewer(const char * hdfile, const char * evfile, int i = 0) 
 {
 
-  FILE * hdf = fopen(hdfile,"r"); 
-  FILE * evf = fopen(evfile,"r"); 
+  gzFile  hdf = gzopen(hdfile,"r"); 
+  gzFile  evf = gzopen(evfile,"r"); 
 
   nuphase_event_t ev; 
   nuphase_header_t hd; 
 
   for (int c = 0; c <= i; c++)
   {
-    nuphase_event_read(evf, &ev); 
-    nuphase_header_read(hdf, &hd); 
+    nuphase_event_gzread(evf, &ev); 
+    nuphase_header_gzread(hdf, &hd); 
   }
 
   nuphase_header_print(stdout, &hd); 
