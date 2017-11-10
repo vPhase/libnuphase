@@ -24,7 +24,7 @@ const char * gpio_unexport_path = "/sys/class/gpio/unexport";
 
 const char * dirstr[]  = { "in","out"}; 
 
-#define LOCK_GPIO_ACCESS 0 
+//#define LOCK_GPIO_ACCESS 
 
 
 bbb_gpio_pin_t *  bbb_gpio_open(int gpio_pin) 

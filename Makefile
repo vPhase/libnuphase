@@ -34,8 +34,9 @@ ifeq ($(SERIAL_DEBUG),1)
 endif
 
 
-PREFIX=/usr/local/ 
+PREFIX=/nuphase
 LIBDIR=lib 
+INCLUDEDIR=include
 
 .PHONY: clean install doc install-doc all client
 
@@ -63,13 +64,16 @@ install-doc:
 
 install-client:  client 
 	install -d $(PREFIX)/$(LIBDIR)
-	install -d $(PREFIX)/$(INCLUDE) 
+	install -d $(PREFIX)/$(INCLUDEDIR)
 	install libnuphase.so $(PREFIX)/$(LIBDIR)  
-	install $(HEADERS) $(PREFIX)/include 
+	install $(HEADERS) $(PREFIX)/$(INCLUDEDIR)
+	echo $(PREFIX)/$(LIBDIR) >> /etc/ld.so.conf.d/nuphase.conf
+	ldconfig
 	
 install:  all install-client 
-	install $(DAQ_HEADERS) $(PREFIX)/include 
-	install libnuphasedaq.so $(PREFIX)/$(LIBDIR)  
+	install $(DAQ_HEADERS) $(PREFIX)/$(INCLUDEDIR) 
+	install libnuphasedaq.so $(PREFIX)/$(LIBDIR)
+
 
 doc: 
 	doxygen doc/Doxyfile 
