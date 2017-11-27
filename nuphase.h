@@ -139,6 +139,7 @@ typedef struct nuphase_status
   uint32_t readout_time;           //!< CPU time of readout, seconds
   uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
   uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
+  uint64_t latched_pps_time;      //!< A timestamp corresponding to a pps time 
   uint8_t board_id;               //!< The board number assigned at startup. 
 
 } nuphase_status_t; 

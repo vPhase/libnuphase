@@ -8,7 +8,7 @@
 //and then generic_*_read must be updated to delegate appropriately. 
 #define NUPHASE_HEADER_VERSION 2 
 #define NUPHASE_EVENT_VERSION 2 
-#define NUPHASE_STATUS_VERSION 1 
+#define NUPHASE_STATUS_VERSION 2 
 #define NUPHASE_HK_VERSION 0 
 
 #define NUPHASE_HEADER_MAGIC 0xa1 
@@ -203,6 +203,19 @@ typedef struct nuphase_event_v1
   uint8_t  data[NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; 
   uint8_t board_id;     
 } nuphase_event_v1_t; 
+
+typedef struct nuphase_status_v0
+{
+  uint16_t global_scalers[NP_NUM_SCALERS];
+  uint16_t beam_scalers[NP_NUM_SCALERS][NP_NUM_BEAMS];  //!< The scaler for each beam (12 bits) 
+  uint32_t deadtime;               //!< The deadtime fraction (units tbd) 
+  uint32_t readout_time;           //!< CPU time of readout, seconds
+  uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
+  uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
+  uint64_t latched_pps_time;      //!< A timestamp corresponding to a pps time 
+  uint8_t board_id;               //!< The board number assigned at startup. 
+
+} nuphase_status_v0_t; 
 
 
 
@@ -477,6 +490,8 @@ static int nuphase_status_generic_read(struct generic_file gf, nuphase_status_t 
   int got; 
   int wanted; 
   uint16_t cksum; 
+  nuphase_status_v0_t v0; 
+
 
   got = packet_start_read(gf, &start, NUPHASE_STATUS_MAGIC, NUPHASE_STATUS_VERSION); 
   if (got) return got; 
@@ -484,6 +499,19 @@ static int nuphase_status_generic_read(struct generic_file gf, nuphase_status_t 
   switch(start.ver) 
   {
     //add cases here if necessary 
+    case 0: 
+      wanted = sizeof(nuphase_status_v0_t); 
+      got = generic_read(gf, wanted, &v0); 
+      cksum = stupid_fletcher16(wanted, &v0); 
+      memcpy(st->global_scalers, v0.global_scalers, sizeof(v0.global_scalers)); 
+      memcpy(st->beam_scalers, v0.beam_scalers, sizeof(v0.beam_scalers)); 
+      st->deadtime = v0.deadtime; 
+      st->readout_time = v0.readout_time; 
+      st->readout_time_ns = v0.readout_time; 
+      memcpy(st->trigger_thresholds, v0.trigger_thresholds, sizeof(v0.trigger_thresholds)); 
+      st->board_id = v0.board_id; 
+      st->latched_pps_time = 0; 
+      break; 
     case NUPHASE_STATUS_VERSION: //this is the most recent status!
       wanted = sizeof(nuphase_status_t); 
       got = generic_read(gf, wanted, st); 
