@@ -36,7 +36,7 @@ extern "C" {
 #define NP_NUM_BUFFER 4 
 
 /** The maximum length of a waveform */ 
-#define NP_MAX_WAVEFORM_LENGTH 2048  
+#define NP_MAX_WAVEFORM_LENGTH 4096  
 
 //master + slave 
 #define NP_MAX_BOARDS 2  
