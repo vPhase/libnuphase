@@ -70,6 +70,8 @@ typedef enum
   REG_UPDATE_SCALERS     = 0x28, 
   REG_PICK_SCALER        = 0x29, 
   REG_CALPULSE           = 0x2a, //cal pulse
+  REG_LATCHED_PPS_LOW    = 0x2c, 
+  REG_LATCHED_PPS_HIGH   = 0x2d, 
   REG_CHANNEL_MASK       = 0x30, 
   REG_ATTEN_012          = 0x32, 
   REG_ATTEN_345          = 0x33, 
@@ -1641,6 +1643,8 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
   struct timespec now; 
   uint8_t scaler_registers[N_SCALER_REGISTERS][NP_SPI_BYTES]; 
 
+  uint8_t latched_pps[2][NP_SPI_BYTES]; 
+
   st->board_id = d->board_id[which]; 
 
   USING(d); 
@@ -1654,6 +1658,11 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
     ret+=append_read_register(d,which, REG_SCALER_READ, scaler_registers[i]); 
   }
 
+  //also add the latched time stamp 
+  
+  ret += append_read_register(d,which, REG_LATCHED_PPS_LOW, latched_pps[0]); 
+  ret += append_read_register(d,which, REG_LATCHED_PPS_HIGH, latched_pps[1]); 
+  
   clock_gettime(CLOCK_REALTIME, &now); 
   ret+= buffer_send(d,which); 
   DONE(d); 
@@ -1684,6 +1693,15 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
       st->beam_scalers[which_scaler][2*which_channel] = second; 
     }
   }
+
+  st->latched_pps_time = latched_pps[0][3]; 
+  st->latched_pps_time |= ((uint64_t) latched_pps[0][2]) << 8; 
+  st->latched_pps_time |= ((uint64_t) latched_pps[0][1]) << 16; 
+  st->latched_pps_time |= ((uint64_t) latched_pps[1][3]) << 24; 
+  st->latched_pps_time |= ((uint64_t) latched_pps[1][2]) << 32; 
+  st->latched_pps_time |= ((uint64_t) latched_pps[1][1]) << 40; 
+
+
   st->readout_time = now.tv_sec; 
   st->readout_time_ns = now.tv_nsec; 
 
