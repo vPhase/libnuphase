@@ -1258,7 +1258,7 @@ int nuphase_get_attenuation(nuphase_dev_t * d, uint8_t * attenuation_master, uin
 
 int nuphase_set_trigger_enables(nuphase_dev_t * d, nuphase_trigger_enable_t enables, nuphase_which_board_t w) 
 {
-  uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, 0, enables}; 
+  uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, enables.enable_beam8 | (enables.enable_beam4a << 1) | (enables.enable_beam4b << 2), enables.enable_beamforming}; 
 
   USING(d); 
   int written = do_write(d->fd[w], trigger_enable_buf); 
@@ -1270,7 +1270,13 @@ nuphase_trigger_enable_t nuphase_get_trigger_enables(nuphase_dev_t * d, nuphase_
 {
   uint8_t trigger_enable_buf[NP_SPI_BYTES]; 
   nuphase_read_register(d,REG_TRIG_ENABLE, trigger_enable_buf, w); 
-  return trigger_enable_buf[3]; 
+  nuphase_trigger_enable_t ans; 
+  ans.enable_beamforming = trigger_enable_buf[3] & 1; 
+  ans.enable_beam8 = trigger_enable_buf[2] & 1; 
+  ans.enable_beam4a = trigger_enable_buf[2] & 2; 
+  ans.enable_beam4b = trigger_enable_buf[2] & 4; 
+
+  return ans; 
 }
 
 int nuphase_phased_trigger_readout(nuphase_dev_t * d, int phased) 
@@ -1846,7 +1852,10 @@ int nuphase_reset(nuphase_dev_t * d, nuphase_reset_t reset_type)
 
     //we need to turn off the phased trigger to not overwhelm ARA 
     nuphase_trigger_enable_t old_enables = nuphase_get_trigger_enables(d, MASTER); 
-    nuphase_set_trigger_enables(d, old_enables & (~NP_TRIGGER_BEAMFORMING), MASTER); 
+    nuphase_trigger_enable_t tmp_enables; 
+    memcpy(&tmp_enables, &old_enables, sizeof(old_enables)); 
+    tmp_enables.enable_beamforming = 0; 
+    nuphase_set_trigger_enables(d, tmp_enables, MASTER); 
 
     //release the calpulser 
     nuphase_calpulse(d, 3); 

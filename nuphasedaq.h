@@ -31,14 +31,14 @@ typedef struct nuphase_dev nuphase_dev_t;
 
 typedef uint8_t nuphase_buffer_mask_t; 
 
-typedef enum nuphase_trigger_enable
+typedef struct nuphase_trigger_enable
 {
-  NP_TRIGGER_BEAMFORMING = 1, 
-  NP_TRIGGER_EXTIN       = 2, 
-  NP_TRIGGER_BEAM8       = 4, 
-  NP_TRIGGER_BEAM4a       = 8, 
-  NP_TRIGGER_BEAM4b       = 16, 
+  uint8_t enable_beamforming : 1; 
+  uint8_t enable_beam8  : 1;  
+  uint8_t enable_beam4a  : 1;  
+  uint8_t enable_beam4b  : 1;  
 } nuphase_trigger_enable_t; 
+
 
 typedef struct nuphase_trigger_output_config
 {
