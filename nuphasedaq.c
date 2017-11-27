@@ -84,14 +84,16 @@ typedef enum
   REG_MODE               = 0x42, //readout mode
   REG_RAM_ADDR           = 0x45, //ram address
   REG_READ               = 0x47, //send data to spi miso 
+  REG_EXT_INPUT_CONFIG   = 0x4b, 
   REG_PRETRIGGER         = 0x4c, 
   REG_CLEAR              = 0x4d, //clear buffers 
   REG_BUFFER             = 0x4e,
   REG_TRIGGER_MASK       = 0x50, 
   REG_TRIG_HOLDOFF       = 0x51, 
   REG_TRIG_ENABLE        = 0x52, 
-  REG_EXT_TRIG_CONFIG    = 0x53, 
+  REG_TRIGOUT_CONFIG     = 0x53, 
   REG_PHASED_TRIGGER     = 0x54, 
+  REG_VERIFICATION_MODE  = 0x55, 
   REG_THRESHOLDS         = 0x56, // add the threshold to this to get the right register
   REG_SET_READ_REG       = 0x6d, 
   REG_RESET_COUNTER      = 0x7e, 
@@ -2065,12 +2067,12 @@ int nuphase_get_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_config_t
 {
 
   uint8_t cfg_buf[NP_SPI_BYTES]; 
-  int ret = nuphase_read_register(d, REG_EXT_TRIG_CONFIG, cfg_buf, MASTER); 
+  int ret = nuphase_read_register(d, REG_TRIGOUT_CONFIG, cfg_buf, MASTER); 
   
   config->width = cfg_buf[2]; 
   config->enable = cfg_buf[3] & 1; 
   config->polarity = (cfg_buf[3] >> 1)  & 1; 
-  config->extin_to_extout = (cfg_buf[3] >> 2)  & 1; 
+  config->send_1Hz = (cfg_buf[3] >> 2)  & 1; 
 
   return ret; 
 }
@@ -2078,15 +2080,56 @@ int nuphase_get_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_config_t
 
 int nuphase_configure_trigger_output(nuphase_dev_t *d, nuphase_trigger_output_config_t config) 
 {
-  uint8_t cfg_buf[NP_SPI_BYTES] = { REG_EXT_TRIG_CONFIG,0, config.width,
+  uint8_t cfg_buf[NP_SPI_BYTES] = { REG_TRIGOUT_CONFIG,0, config.width,
                                     (config.enable & 1 ) | ((config.polarity & 1) <<1) 
-                                     | ((config.extin_to_extout & 1) << 2) 
+                                     | ((config.send_1Hz & 1) << 2) 
                                   }; 
 
   USING(d); 
   int written = do_write(d->fd[MASTER], cfg_buf); 
   DONE(d); 
   return written != NP_SPI_BYTES; 
+}
+int nuphase_configure_ext_trigger_in(nuphase_dev_t * d, nuphase_ext_input_config_t config) 
+{
+  uint8_t cfg_buf[NP_SPI_BYTES] = { REG_EXT_INPUT_CONFIG, 
+                                   config.gate_width >> 8,
+                                   config.gate_width & 8,
+                                   (config.use_as_trigger & 1) | ((config.gate_enable & 1)<<1)} ; 
+  USING(d); 
+  int written = do_write(d->fd[MASTER], cfg_buf); 
+  DONE(d); 
+  return written != NP_SPI_BYTES; 
+}
+
+/** get the external trigger config */ 
+int nuphase_get_ext_trigger_in(nuphase_dev_t * d, nuphase_ext_input_config_t * config) 
+{
+  uint8_t cfg_buf[NP_SPI_ENABLE]; 
+  int ret = nuphase_read_register(d, REG_EXT_INPUT_CONFIG, cfg_buf, MASTER); 
+
+  config->use_as_trigger = cfg_buf[3] & 1; 
+  config->gate_enable = (cfg_buf[3] >> 1)  & 1; 
+  config->gate_width = cfg_buf[2] | (cfg_buf[1] << 8); 
+  return ret; 
+}
+
+
+int nuphase_enable_verification_mode(nuphase_dev_t * d, int mode) 
+{
+  uint8_t buf[NP_SPI_BYTES] = { REG_VERIFICATION_MODE,0,0, mode & 1}; 
+  USING(d); 
+  int written = do_write(d->fd[MASTER], buf); 
+  DONE(d); 
+  return written != NP_SPI_BYTES; 
+}
+
+int nuphase_query_verification_mode(nuphase_dev_t * d) 
+{
+  uint8_t buf[NP_SPI_BYTES]; 
+  int ret = nuphase_read_register(d,REG_VERIFICATION_MODE,buf,MASTER); 
+  if (ret) return -1; 
+  return buf[3] & 1; 
 }
 
 int nuphase_set_poll_interval(nuphase_dev_t * d, uint16_t interval)

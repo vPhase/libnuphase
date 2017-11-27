@@ -44,11 +44,17 @@ typedef struct nuphase_trigger_output_config
 {
   uint8_t enable : 1; 
   uint8_t polarity : 1; 
-  uint8_t extin_to_extout : 1; 
+  uint8_t send_1Hz : 1; 
   uint8_t width; 
 } nuphase_trigger_output_config_t ; 
 
 
+typedef struct nuphase_ext_input_config 
+{
+  uint8_t use_as_trigger : 1; 
+  uint8_t gate_enable : 1; 
+  uint16_t gate_width; 
+} nuphase_ext_input_config_t; 
 
 typedef enum nuphase_which_board
 {
@@ -382,7 +388,7 @@ int nuphase_set_pretrigger(nuphase_dev_t *d, uint8_t pretrigger);
 
 /** Get the pretrigger (0-7) (should be the same for both boards).
  *
- * This jsut returns the cached value, so it's possible that it was changed from underneath us. 
+ * This just returns the cached value, so it's possible that it was changed from underneath us. 
  * */ 
 uint8_t nuphase_get_pretrigger(const nuphase_dev_t *d); 
 
@@ -392,8 +398,20 @@ int nuphase_configure_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_c
 /** get the external output config */ 
 int nuphase_get_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_config_t * config); 
 
+/** Set the external triger config */ 
+int nuphase_configure_ext_trigger_in(nuphase_dev_t * d, nuphase_ext_input_config_t config); 
+
+/** get the external trigger config */ 
+int nuphase_get_ext_trigger_in(nuphase_dev_t * d, nuphase_ext_input_config_t * config); 
+
+int nuphase_enable_verification_mode(nuphase_dev_t * d, int mode); 
+
+/* 0 if not on, 1 if on, -1 if error */ 
+int nuphase_query_verification_mode(nuphase_dev_t * d); 
 
 /** The poll interval for waiting, in us. If 0, will just do a sched_yield */ 
 int nuphase_set_poll_interval(nuphase_dev_t *, unsigned short us); 
+
+
 
 #endif
