@@ -1260,6 +1260,7 @@ int nuphase_set_trigger_enables(nuphase_dev_t * d, nuphase_trigger_enable_t enab
 {
   uint8_t trigger_enable_buf[NP_SPI_BYTES] = {REG_TRIG_ENABLE, 0, enables.enable_beam8 | (enables.enable_beam4a << 1) | (enables.enable_beam4b << 2), enables.enable_beamforming}; 
 
+//  printf("Setting trigger enables: [0x%x 0x%x 0x%x 0x%x]\n", trigger_enable_buf[0], trigger_enable_buf[1], trigger_enable_buf[2], trigger_enable_buf[3]); 
   USING(d); 
   int written = do_write(d->fd[w], trigger_enable_buf); 
   DONE(d); 
@@ -1270,11 +1271,12 @@ nuphase_trigger_enable_t nuphase_get_trigger_enables(nuphase_dev_t * d, nuphase_
 {
   uint8_t trigger_enable_buf[NP_SPI_BYTES]; 
   nuphase_read_register(d,REG_TRIG_ENABLE, trigger_enable_buf, w); 
+//  printf("Got trigger enables: [0x%x 0x%x 0x%x 0x%x]\n", trigger_enable_buf[0], trigger_enable_buf[1], trigger_enable_buf[2], trigger_enable_buf[3]); 
   nuphase_trigger_enable_t ans; 
   ans.enable_beamforming = trigger_enable_buf[3] & 1; 
   ans.enable_beam8 = trigger_enable_buf[2] & 1; 
-  ans.enable_beam4a = trigger_enable_buf[2] & 2; 
-  ans.enable_beam4b = trigger_enable_buf[2] & 4; 
+  ans.enable_beam4a = (trigger_enable_buf[2] >> 1) & 1; 
+  ans.enable_beam4b = (trigger_enable_buf[2] >> 2) & 1; 
 
   return ans; 
 }
