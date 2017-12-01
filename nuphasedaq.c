@@ -1537,9 +1537,16 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
           hd[iout]->sync_problem |= 2; 
         }
 
-        if (abs(hd[iout]->trig_time[ibd] -  hd[iout]->trig_time[0] > 2 ))
+        if (abs(hd[iout]->trig_time[ibd] -  hd[iout]->trig_time[0]) > 2)
         {
-          fprintf(stderr,"Trig times differ by more than 2 clock cycles between boards!\n"); 
+          static unsigned nprinted = 0; 
+
+          if (nprinted < 10) 
+          {
+            nprinted++; 
+            fprintf(stderr,"Trig times differ by more than 2 clock cycles between boards! (printing %d more times) \n", 10-nprinted); 
+          }
+
           hd[iout]->sync_problem |= 4; 
         }
 
