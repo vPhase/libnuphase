@@ -9,7 +9,7 @@
 
 // read_many spidev [swtrig=1] [hdfile] [evfile] 
 
-volatile static int stop = 0; 
+static volatile int stop = 0; 
 
 nuphase_dev_t * dev;
 static void catch_interrupt(int signo)
@@ -54,9 +54,12 @@ int main(int nargs, char ** args )
   
 
   uint32_t thresholds[NP_NUM_BEAMS]; 
+  uint8_t attenuation[NP_NUM_CHAN]; 
+  memset(attenuation,0,sizeof(attenuation)); 
   int i = 0; 
-  for ( i = 0; i < NP_NUM_BEAMS;i++) thresholds[i] = 34000; 
+  for ( i = 0; i < NP_NUM_BEAMS;i++) thresholds[i] = 11000; 
   nuphase_set_thresholds(dev, thresholds, 0); 
+//  nuphase_set_attenuation(dev, attenuation, attenuation); 
 
   
 
@@ -67,7 +70,7 @@ int main(int nargs, char ** args )
   nuphase_set_trigger_enables(dev, 0x1f, MASTER); 
 
   nuphase_calpulse(dev,calpulse); 
-//  nuphase_phased_trigger_readout(dev,1); 
+  nuphase_phased_trigger_readout(dev,1); 
 
 
   printf("Starting event loop... ctrl-c to cancel!\n"); 
