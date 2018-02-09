@@ -239,9 +239,11 @@ static int http_update(nuphase_hk_t * hk)
   // set the call back 
   curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, save_http); 
 
-  // release the cURL 
-  curl_easy_perform(curl); 
+  /** twenty second timeout */ 
+  curl_easy_setopt( curl, CURLOPT_TIMEOUT, 20); 
 
+  // release the cURL 
+  if (curl_easy_perform(curl)) return 1; 
   //parse what we have wrought
   return parse_http(http_buf, hk); 
 }
@@ -506,12 +508,34 @@ static int serial_update(nuphase_hk_t * hk)
     write(serial_fd,query_string, sizeof(query_string)-1); 
     //looks like CmdArduino echoes everything 
     char garbage = '0'; 
+    int navail = 0; 
+
+    int elapsed = 0;
+
+    //Make sure we are actually getting something... 
     while (garbage != '\n') 
     {
+      while (!navail && elapsed++ < 10)
+      {
+        ioctl(serial_fd, FIONREAD,&navail); 
+        usleep(1000); 
+      }
+      if (elapsed > 9) break; //took too long to get a character
+      elapsed = 0; 
+      navail--; 
       read(serial_fd, &garbage,1); 
     }
 
-    read(serial_fd, &data, sizeof(data)); 
+
+    if (elapsed < 10) 
+    {
+      read(serial_fd, &data, sizeof(data)); 
+    }
+    else 
+    {
+      data.magic_start = 0; 
+      data.magic_end = 0; 
+    }
 
     if ( data.magic_start != 0xe110 || data.magic_end != 0xef0f) 
     {
@@ -709,6 +733,8 @@ int nuphase_hk(nuphase_hk_t * hk, nuphase_asps_method_t method )
   {
     ret += serial_update(hk); 
   }
+
+  if (ret) return 1; //something went wrong
 
   /* now, read in our temperatures, (but only if the asps state is appropriate) */ 
 
