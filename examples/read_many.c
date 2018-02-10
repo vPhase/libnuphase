@@ -66,8 +66,11 @@ int main(int nargs, char ** args )
   nuphase_set_readout_number_offset(dev,0); 
 //  nuphase_set_buffer_length(dev,127*16); 
 //enable phased readout 
-  nuphase_set_trigger_enables(dev, 0x1e, SLAVE); 
-  nuphase_set_trigger_enables(dev, 0x1f, MASTER); 
+//
+  nuphase_trigger_enable_t enable = {.enable_beamforming = 0, .enable_beam8=1, .enable_beam4a =1, .enable_beam4b =1 }; 
+  nuphase_set_trigger_enables(dev, enable, SLAVE); 
+  enable.enable_beamforming = 1; 
+  nuphase_set_trigger_enables(dev, enable, MASTER); 
 
   nuphase_calpulse(dev,calpulse); 
   nuphase_phased_trigger_readout(dev,1); 
