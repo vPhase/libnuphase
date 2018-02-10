@@ -1,7 +1,7 @@
 #include "nuphase.h" 
 #include <stdio.h> 
 #include "zlib.h"
-#include <string.h> 
+#include "string.h" 
 
 
 int main(int nargs, char ** args) 
@@ -9,9 +9,10 @@ int main(int nargs, char ** args)
 
   if (nargs < 2) 
   {
-    fprintf(stderr,"dump_events events.dat"); 
+    fprintf(stderr,"dump_status status.dat"); 
     return 1; 
   }
+
 
 
   int is_zipped = strstr(args[1],".gz") != 0; 
@@ -19,11 +20,12 @@ int main(int nargs, char ** args)
   if (!is_zipped)
   {
     FILE * f = fopen(args[1], "r"); 
-    nuphase_event_t ev;
+    nuphase_status_t status;
 
-    while (!nuphase_event_read(f,&ev))
+
+    while (!nuphase_status_read(f,&status))
     {
-        nuphase_event_print(stdout, &ev, ','); 
+      nuphase_status_print(stdout, &status); 
     }
 
     fclose(f); 
@@ -31,16 +33,16 @@ int main(int nargs, char ** args)
   else
   {
     gzFile f = gzopen(args[1], "r"); 
-    nuphase_event_t ev;
+    nuphase_status_t status;
 
-    while (!nuphase_event_gzread(f,&ev))
+    while (!nuphase_status_gzread(f,&status))
     {
-        nuphase_event_print(stdout, &ev, ','); 
+      nuphase_status_print(stdout, &status); 
     }
 
     gzclose(f); 
-  }
 
+  }
 
   return 0; 
 

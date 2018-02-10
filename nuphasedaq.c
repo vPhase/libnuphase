@@ -1371,9 +1371,9 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
   // we need to store some stuff in an intermediate format 
   // prior to putting into the header since the bits don't match 
-  uint32_t event_counter[2]; 
-  uint32_t trig_counter[2]; 
-  uint32_t trig_time[2]; 
+  uint64_t event_counter[2]; 
+  uint64_t trig_counter[2]; 
+  uint64_t trig_time[2]; 
   uint32_t deadtime; 
   uint32_t tmask; 
   uint32_t tinfo; 
