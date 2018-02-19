@@ -709,7 +709,7 @@ int nuphase_status_print(FILE *f, const nuphase_status_t *st)
   tim = gmtime((time_t*) &t); 
   strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
   fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id, timstr, st->readout_time_ns); 
-  fprintf(f,"latched pps: %llu \n", st->latched_pps_time); 
+  fprintf(f,"latched pps: %"PRIu64"  \n", st->latched_pps_time); 
 
   fprintf(f,"\t which \t 0.1 Hz, gated 0.1Hz, 1 Hz, threshold\n"); 
   fprintf(f,"\tGLOBAL: \t%u \t%u \t%u\n", st->global_scalers[SCALER_SLOW], st->global_scalers[SCALER_SLOW_GATED], st->global_scalers[SCALER_FAST]); 
