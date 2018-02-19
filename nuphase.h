@@ -96,7 +96,7 @@ typedef struct nuphase_header
   uint8_t buffer_number;                         //!< the buffer number (do we need this?) 
   uint8_t channel_mask;                          //!< The channels allowed to participate in the trigger
   uint8_t channel_read_mask[NP_MAX_BOARDS];      //!< The channels actually read
-  uint8_t channel_overflow;                      //!< Bitmask of channels that overflowed the 5 bits 
+  uint8_t gate_flag;                             //!< gate flag  (used to be channel_overflow but that was never used) 
   uint8_t buffer_mask;                           //!< The buffer mask at time of read out (do we want this?)   
   uint8_t board_id[NP_MAX_BOARDS];               //!< The board number assigned at startup. If board_id[1] == 0, no slave. 
   nuphase_trig_type_t trig_type;                 //!< The trigger type? 

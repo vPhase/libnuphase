@@ -771,6 +771,7 @@ int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
   fprintf(f,"\ttrig_channel_mask: %x\n", hd->channel_mask); 
   fprintf(f,"\tchannel_read_mask: (%x,%x)\n", hd->channel_read_mask[0],hd->channel_read_mask[1]); 
   fprintf(f,"\tcalpulser: %s\n", hd->calpulser ? "yes" : "no"); 
+  fprintf(f,"\tgate?: %s\n", hd->gate_flag & 1 ? "yes" : "no"); 
   
 
   return 0; 

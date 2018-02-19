@@ -1514,7 +1514,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
   
         hd[iout]->buffer_number = hwbuf; 
-        hd[iout]->channel_overflow = 0; //TODO not implemented yet 
+        hd[iout]->gate_flag = (tmask >> 23) & 1; 
         hd[iout]->buffer_mask = mask; //this is the current buffer mask
         hd[iout]->trig_type = (tinfo >> 15) & 0x3; 
         hd[iout]->calpulser = (tinfo >> 21) & 0x1; 
