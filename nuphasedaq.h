@@ -412,6 +412,14 @@ int nuphase_query_verification_mode(nuphase_dev_t * d);
 /** The poll interval for waiting, in us. If 0, will just do a sched_yield */ 
 int nuphase_set_poll_interval(nuphase_dev_t *, unsigned short us); 
 
+/** Sets the trigger delays. Should have NP_NUM_CHAN members */ 
+int nuphase_set_trigger_delays(nuphase_dev_t *d, const uint8_t * delays); 
+
+/** Gets the trigger delays. Should have NP_NUM_CHAN members */ 
+int nuphase_get_trigger_delays(nuphase_dev_t *d, uint8_t * delays); 
+
+
+
 
 
 #endif

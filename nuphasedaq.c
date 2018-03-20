@@ -79,6 +79,9 @@ typedef enum
   REG_ATTEN_APPLY        = 0x35, 
   REG_ADC_CLK_RST        = 0x37,  
   REG_ADC_DELAYS         = 0x38, //add buffer number to get all 
+  REG_TRIG_DELAY_012     = 0x3d, 
+  REG_TRIG_DELAY_345     = 0x3e, 
+  REG_TRIG_DELAY_67      = 0x3f, 
   REG_FORCE_TRIG         = 0x40, 
   REG_CHANNEL            = 0x41, //select channel to read
   REG_MODE               = 0x42, //readout mode
@@ -2157,3 +2160,44 @@ int nuphase_set_poll_interval(nuphase_dev_t * d, uint16_t interval)
 }
 
 
+int nuphase_set_trigger_delays(nuphase_dev_t *d, const uint8_t * delays)
+{
+  uint8_t del_012[NP_SPI_BYTES] = {REG_TRIG_DELAY_012, delays[2], delays[1], delays[0]}; 
+  uint8_t del_345[NP_SPI_BYTES] = {REG_TRIG_DELAY_345, delays[5], delays[4], delays[3]}; 
+  uint8_t del_67[NP_SPI_BYTES] = {REG_TRIG_DELAY_67, 0, delays[7], delays[6]}; 
+  int ret = 0;  
+  USING(d); 
+  buffer_append(d, MASTER, del_012,0); 
+  buffer_append(d, MASTER, del_345,0); 
+  buffer_append(d, MASTER, del_67,0); 
+  ret = buffer_send(d,MASTER); 
+  DONE(d); 
+  return  ret; 
+}
+
+
+int nuphase_get_trigger_delays(nuphase_dev_t *d, uint8_t * delays)
+{
+  uint8_t del_012[NP_SPI_BYTES] = {0,0,0,0}; 
+  uint8_t del_345[NP_SPI_BYTES] = {0,0,0,0};
+  uint8_t del_67[NP_SPI_BYTES] =  {0,0,0,0}; 
+  int ret = 0;  
+
+  USING(d); 
+  append_read_register(d, MASTER, REG_TRIG_DELAY_012, del_012); 
+  append_read_register(d, MASTER, REG_TRIG_DELAY_345, del_345); 
+  append_read_register(d, MASTER, REG_TRIG_DELAY_67, del_67); 
+  ret = buffer_send(d,MASTER); 
+  DONE(d); 
+
+  delays[0] = del_012[3]; 
+  delays[1] = del_012[2]; 
+  delays[2] = del_012[1]; 
+  delays[3] = del_345[3]; 
+  delays[4] = del_345[2]; 
+  delays[5] = del_345[1]; 
+  delays[6] = del_67[3]; 
+  delays[7] = del_67[2]; 
+
+  return  ret; 
+}
