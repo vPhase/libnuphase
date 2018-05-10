@@ -2201,3 +2201,9 @@ int nuphase_get_trigger_delays(nuphase_dev_t *d, uint8_t * delays)
 
   return  ret; 
 }
+
+int nuphase_set_min_threshold(nuphase_dev_t * d, uint32_t min) 
+{
+  d->min_threshold = min; 
+  return 0; 
+}

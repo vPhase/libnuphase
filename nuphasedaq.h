@@ -418,6 +418,8 @@ int nuphase_set_trigger_delays(nuphase_dev_t *d, const uint8_t * delays);
 /** Gets the trigger delays. Should have NP_NUM_CHAN members */ 
 int nuphase_get_trigger_delays(nuphase_dev_t *d, uint8_t * delays); 
 
+/** Set the minimum threshold for any beam (default, 5000) */ 
+int nuphase_set_min_threshold(nuphase_dev_t *d, uint32_t min_threshold); 
 
 
 
