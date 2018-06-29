@@ -67,8 +67,8 @@ install-client:  client
 	install -d $(PREFIX)/$(INCLUDEDIR)
 	install libnuphase.so $(PREFIX)/$(LIBDIR)  
 	install $(HEADERS) $(PREFIX)/$(INCLUDEDIR)
-	echo $(PREFIX)/$(LIBDIR) >> /etc/ld.so.conf.d/nuphase.conf
-	ldconfig
+	-echo $(PREFIX)/$(LIBDIR) >> /etc/ld.so.conf.d/nuphase.conf
+	-ldconfig
 	
 install:  all install-client 
 	install $(DAQ_HEADERS) $(PREFIX)/$(INCLUDEDIR) 
