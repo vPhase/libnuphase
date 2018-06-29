@@ -24,7 +24,7 @@
 #define NP_NUM_REGISTER 128
 #define BUF_MASK 0xf
 #define MAX_PRETRIGGER 8 
-#define BOARD_CLOCK_HZ 25000000
+#define BOARD_CLOCK_HZ 1500000000/16 
 
 // master + slave
 #define NBD(d) (d->fd[1] ? 2 : 1)
