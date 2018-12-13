@@ -368,6 +368,13 @@ int nuphase_set_channel_mask(nuphase_dev_t * d, uint8_t channel_mask);
  * */ 
 uint16_t nuphase_get_channel_mask(nuphase_dev_t *d); 
 
+/** Sets the channel read mask */ 
+int nuphase_set_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t board, uint8_t mask); 
+
+/** Gets the channel read mask */ 
+uint8_t nuphase_get_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t board); 
+
+
 /** Set the trigger enables */ 
 int nuphase_set_trigger_enables(nuphase_dev_t *d, nuphase_trigger_enable_t enable, nuphase_which_board_t which); 
 

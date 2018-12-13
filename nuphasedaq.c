@@ -730,7 +730,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->readout_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
   dev->channel_read_mask[0] = 0xff; 
-  dev->channel_read_mask[1] = fd[1] ? 0xf : 0; 
+  dev->channel_read_mask[1] = fd[1] ? 0xff : 0; 
   dev->board_id[0] = board_id_counter++; 
   dev->board_id[1] = fd[1] ? board_id_counter++ : 0; 
 
@@ -2207,3 +2207,25 @@ int nuphase_set_min_threshold(nuphase_dev_t * d, uint32_t min)
   d->min_threshold = min; 
   return 0; 
 }
+
+
+int nuphase_set_channel_read_mask(nuphase_dev_t * d, nuphase_which_board_t bd, uint8_t mask) 
+{
+  if (bd < NBD(d))
+  {
+    d->channel_read_mask[bd] = mask; 
+    return 0; 
+  }
+  return 1;
+}
+
+uint8_t nuphase_get_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t bd) 
+{
+  if (bd < NBD(d)) 
+  {
+    return d->channel_read_mask[bd]; 
+  }
+  return 0; 
+}
+
+
