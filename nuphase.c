@@ -744,7 +744,7 @@ int nuphase_status_print(FILE *f, const nuphase_status_t *st)
   return 0; 
 }
 
-static const char * trig_type_names[4]  = { "NONE", "SW", "RF" ,"EXT" } ; 
+static const char * trig_type_names[5]  = { "NONE", "SW", "RF" ,"EXT","SURFACE" } ; 
 
 
 int nuphase_header_print(FILE *f, const nuphase_header_t *hd)
@@ -808,7 +808,7 @@ int nuphase_event_print(FILE *f, const nuphase_event_t *ev, char sep)
   for (ibd = 0; ibd < NP_MAX_BOARDS; ibd++)
   {
     if (!ev->board_id[ibd]) continue;
-    fprintf(f, "EVENT NUMBER:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", sep,ev->event_number,sep,sep,ev->board_id[ibd], sep,sep,ev->buffer_length ); 
+    fprintf(f, "%sEVENT NUMBER:%c %"PRIu64" %c BOARD: %c %d %c LENGTH: %c %d \n", NP_IS_SURFACE_EVENT(ev) ? "SURFACE ":"", sep,ev->event_number,sep,sep,ev->board_id[ibd], sep,sep,ev->buffer_length ); 
     for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
     {
       for (isamp = 0; isamp < ev->buffer_length; isamp++) 
