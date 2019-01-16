@@ -150,6 +150,7 @@ struct nuphase_dev
   int spi_clock; 
   int cs_change; 
   int delay_us; 
+  int surface_readout; 
 
   uint8_t pretrigger; 
   uint8_t surface_pretrigger; 
@@ -750,7 +751,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
 //  dev->current_mode[1] = -1; 
 
   dev->min_threshold = 5000; 
-
+  dev->surface_readout = 1; 
   //Configure the SPI protocol 
   uint8_t mode = SPI_MODE_0;  //we could change the chip select here too 
   int ifd = 0;
@@ -1040,7 +1041,7 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
   DONE(d); 
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (next) *next = (result[2] >> 4) & 0x3; 
-  if (surface) *surface = !!(result[3]  & 10); 
+  if (surface) *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 10); 
   return mask; 
 }
 
@@ -1382,10 +1383,10 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
                                       int * surface_read)  
 {
   nuphase_buffer_mask_t mask; ; 
-  int surface; 
+  int surface = 0; 
   int ret = 0; 
 
-  nuphase_wait(d,&mask,-1,(surface_header && surface_event) ? &surface : 0 ); 
+  nuphase_wait(d,&mask,-1,(surface_header && surface_event && d->surface_readout == 1) ? &surface : 0 ); 
   if (mask) 
   {
     int check; 
@@ -1465,6 +1466,8 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   int ibd; 
 
   int doing_surface = (mask == NUPHASE_SURFACE_MASK); 
+  if (doing_surface && d->surface_readout < 0) return -1; 
+
   int nbufs = doing_surface ? 1: __builtin_popcount(mask); 
 
 
@@ -2357,14 +2360,14 @@ int nuphase_set_min_threshold(nuphase_dev_t * d, uint32_t min)
 }
 
 
-int nuphase_set_channel_read_mask_surface(nuphase_dev_t * d,  uint8_t mask) 
+int nuphase_set_surface_channel_read_mask(nuphase_dev_t * d,  uint8_t mask) 
 {
-  if (NBD(d) < 2) return 1; 
+  if (NBD(d) < 2 || d->surface_readout < 0) return 1; 
   d->surface_channel_read_mask = mask;
   return 0; 
 }
 
-uint8_t nuphase_get_channel_read_mask_surface(nuphase_dev_t *d) 
+uint8_t nuphase_get_surface_channel_read_mask(nuphase_dev_t *d) 
 {
   return d->surface_channel_read_mask; 
 
@@ -2397,6 +2400,7 @@ int nuphase_surface_powerdown(nuphase_dev_t * d)
   USING(d); 
   ret = do_write(d->fd[SLAVE], powerdown_bytes);
   DONE(d); 
+  if (ret ==0) d->surface_readout =-1 ; 
   return ret; 
 }
 
@@ -2405,7 +2409,7 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
   int ret; 
   uint8_t buf1[NP_SPI_BYTES] = { REG_SURFACE_1, s->antenna_mask, s->coincident_window_length, s->vpp_threshold};
   uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, s->n_coincident_channels };
-  if (NBD(d) < 2) return 1; 
+  if (NBD(d) < 2 || d->surface_readout < 0) return 1; 
 
   USING(d); 
   ret =buffer_append(d,SLAVE,buf1,0);
@@ -2424,7 +2428,8 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
 int nuphase_surface_check_buffer(nuphase_dev_t *d) 
 {
 
-  if (NBD(d) < 2) return -1; 
+  if (NBD(d) < 2 || d->surface_readout < 0) return -1; 
+  if (d->surface_readout == 0) return 0; 
   int ret; 
   uint8_t val[NP_SPI_BYTES]; 
 
