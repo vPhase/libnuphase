@@ -2443,3 +2443,11 @@ int nuphase_surface_check_buffer(nuphase_dev_t *d)
 }
 
 
+int nuphase_enable_surface_readout(nuphase_dev_t *d, int enable) 
+{
+  if ( NBD(d) < 2 || d->surface_readout < 0) return 1; 
+  d->surface_readout = !!enable; 
+  return 0; 
+
+}
+

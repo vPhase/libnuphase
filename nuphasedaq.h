@@ -255,7 +255,7 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat, int read_surf
   int nread; 
   nuphase_header_t headers[NP_NUM_BUFFER]; 
   nuphase_event_t events[NP_NUM_BUFFER]; 
-  nread = wait_for_and_read_multiple_events(device, &headers, &events); 
+  nread = wait_for_and_read_multiple_events(device, &headers, &events,0,0,0); 
   \endverbatim
  
  * OR the dynamically allocated variant
@@ -264,12 +264,12 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat, int read_surf
   int nread; 
   nuphase_header_t (*headers)[NP_NUM_BUFFER] = malloc(sizeof(*headers)); 
   nuphase_header_t (*events)[NP_NUM_BUFFER] = malloc(sizeof(*headers)); 
-  nread = wait_for_and_read_multiple_events(device, &headers, &events); 
+  nread = wait_for_and_read_multiple_events(device, &headers, &events,0,0,0); 
  
   \endverbatim
  *
  *
- * May also wait for surface events if the surface pointers are non-zero. 
+ * May also wait for surface events if the surface pointers are non-zero and the surface trigger is enabled. 
  *
  * Returns the number of events read, excluding surface, which is passed to surface_read if non_zero . 
  *
@@ -407,11 +407,11 @@ uint16_t nuphase_get_channel_mask(nuphase_dev_t *d);
 
 /** Sets the channel read mask */ 
 int nuphase_set_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t board, uint8_t mask); 
-int nuphase_set_channel_read_mask_surface(nuphase_dev_t *d, uint8_t mask); 
+int nuphase_set_surface_channel_read_mask(nuphase_dev_t *d, uint8_t mask); 
 
 /** Gets the channel read mask */ 
 uint8_t nuphase_get_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t board); 
-uint8_t nuphase_get_channel_read_mask_surface(nuphase_dev_t *d); 
+uint8_t nuphase_get_surface_channel_read_mask(nuphase_dev_t *d); 
 
 
 /** Set the trigger enables */ 
@@ -468,7 +468,10 @@ int nuphase_get_trigger_delays(nuphase_dev_t *d, uint8_t * delays);
 int nuphase_set_min_threshold(nuphase_dev_t *d, uint32_t min_threshold); 
 
 
-// surface stuff
+// this is necessary to toggle surface readout (otherwise nuphase_wait won't bother checking for surface events and nuphase*read won't actually do anything ) 
+int nuphase_enable_surface_readout(nuphase_dev_t *d, int enable) ;
+
+
 /** This turns off the surface channel ADC's. Must reset to clear */
 int nuphase_surface_powerdown(nuphase_dev_t *d) ; 
 
