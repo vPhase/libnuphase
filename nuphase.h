@@ -63,7 +63,8 @@ typedef enum nuphase_trigger_type
   NP_TRIG_NONE,   //<! Triggered by nothing (should never happen but if it does it's a bad sign1) 
   NP_TRIG_SW,    //!< triggered by software (force trigger)  
   NP_TRIG_RF,    //!< triggered by input wavecforms
-  NP_TRIG_EXT    //!< triggered by external trigger 
+  NP_TRIG_EXT,    //!< triggered by external trigger 
+  NP_TRIG_SURF    //!< triggered by surface trigger 
 } nuphase_trig_type_t; 
 
 /** in memory layout of nuphase event headers. 
@@ -84,9 +85,9 @@ typedef struct nuphase_header
   uint64_t trig_number;                          //!< the sequential (since reset) trigger number assigned to this event. 
   uint16_t buffer_length;                        //!< the buffer length. Stored both here and in the event. 
   uint16_t pretrigger_samples;                   //!< Number of samples that are pretrigger
-  uint32_t readout_time[NP_MAX_BOARDS];          //!< CPU time of readout, seconds
-  uint32_t readout_time_ns[NP_MAX_BOARDS];       //!< CPU time of readout, nanoseconds 
-  uint64_t trig_time[NP_MAX_BOARDS];             //!< Board trigger time (raw units) 
+  uint32_t readout_time[NP_MAX_BOARDS];          //!< CPU time of readout, seconds. for surface events, only second is populated.
+  uint32_t readout_time_ns[NP_MAX_BOARDS];       //!< CPU time of readout, nanoseconds . for surface events, only second is populated.
+  uint64_t trig_time[NP_MAX_BOARDS];             //!< Board trigger time (raw units) . for surface events, only second is populated.
   uint32_t approx_trigger_time;                  //!< Board trigger time converted to real units (approx secs), master only
   uint32_t approx_trigger_time_nsecs;            //!< Board trigger time converted to real units (approx nnsecs), master only
   uint16_t triggered_beams;                      //!< The beams that triggered 
@@ -113,11 +114,13 @@ typedef struct nuphase_event
 {
   uint64_t event_number;  //!< The event number. Should match event header.  
   uint16_t buffer_length; //!< The buffer length that is actually filled. Also available in event header. 
-  uint8_t board_id[NP_MAX_BOARDS];     //!< The board number assigned at startup. If the second board_id is zero, that indicates there is no slave device. 
+  uint8_t board_id[NP_MAX_BOARDS];     //!< The board number assigned at startup. If the second board_id is zero, that indicates there is no slave device. If the FIRST board_id is zero, indicates that this is a surface trigger. 
   uint8_t  data[NP_MAX_BOARDS][NP_NUM_CHAN][NP_MAX_WAVEFORM_LENGTH]; //!< The waveform data. Only the first buffer_length bytes of each are important. The second array is only filled if there is a slave-device. 
 } nuphase_event_t; 
 
 
+//macro to check if the event is a surface event in lieu of storing a type
+#define NP_IS_SURFACE_EVENT(event_ptr) (!event_ptr->board_id[0] && event_ptr->board_id[1] )
 
 typedef enum nuphase_scaler_type
 {
@@ -125,6 +128,8 @@ typedef enum nuphase_scaler_type
   SCALER_SLOW_GATED,
   SCALER_FAST
 } nuphase_scaler_type_t; 
+
+
 
 #define NP_SCALER_TIME(type) (type==SCALER_FAST ? 1 : 10) 
 
@@ -140,7 +145,8 @@ typedef struct nuphase_status
   uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
   uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
   uint64_t latched_pps_time;      //!< A timestamp corresponding to a pps time 
-  uint8_t board_id;               //!< The board number assigned at startup. 
+  uint8_t board_id[2];               //!< The board number assigned at startup.
+  uint16_t surface_scalers[NP_NUM_SCALERS]; //!< Surface scalers, if present 
 
 } nuphase_status_t; 
 

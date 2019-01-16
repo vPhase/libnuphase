@@ -8,7 +8,7 @@
 //and then generic_*_read must be updated to delegate appropriately. 
 #define NUPHASE_HEADER_VERSION 2 
 #define NUPHASE_EVENT_VERSION 2 
-#define NUPHASE_STATUS_VERSION 2 
+#define NUPHASE_STATUS_VERSION 3 
 #define NUPHASE_HK_VERSION 0 
 
 #define NUPHASE_HEADER_MAGIC 0xa1 
@@ -212,10 +212,22 @@ typedef struct nuphase_status_v0
   uint32_t readout_time;           //!< CPU time of readout, seconds
   uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
   uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
-  uint64_t latched_pps_time;      //!< A timestamp corresponding to a pps time 
   uint8_t board_id;               //!< The board number assigned at startup. 
 
 } nuphase_status_v0_t; 
+
+typedef struct nuphase_status_v2
+{
+  uint16_t global_scalers[NP_NUM_SCALERS];
+  uint16_t beam_scalers[NP_NUM_SCALERS][NP_NUM_BEAMS];  //!< The scaler for each beam (12 bits) 
+  uint32_t deadtime;               //!< The deadtime fraction (units tbd) 
+  uint32_t readout_time;           //!< CPU time of readout, seconds
+  uint32_t readout_time_ns;        //!< CPU time of readout, nanoseconds 
+  uint32_t trigger_thresholds[NP_NUM_BEAMS]; //!< The trigger thresholds  
+  uint64_t latched_pps_time;      //!< A timestamp corresponding to a pps time 
+  uint8_t board_id;               //!< The board number assigned at startup.
+
+} nuphase_status_v2_t; 
 
 
 
@@ -491,7 +503,9 @@ static int nuphase_status_generic_read(struct generic_file gf, nuphase_status_t 
   int wanted; 
   uint16_t cksum; 
   nuphase_status_v0_t v0; 
+  nuphase_status_v2_t v2; 
 
+  memset(st,0,sizeof(nuphase_status_t)); 
 
   got = packet_start_read(gf, &start, NUPHASE_STATUS_MAGIC, NUPHASE_STATUS_VERSION); 
   if (got) return got; 
@@ -509,9 +523,15 @@ static int nuphase_status_generic_read(struct generic_file gf, nuphase_status_t 
       st->readout_time = v0.readout_time; 
       st->readout_time_ns = v0.readout_time; 
       memcpy(st->trigger_thresholds, v0.trigger_thresholds, sizeof(v0.trigger_thresholds)); 
-      st->board_id = v0.board_id; 
+      st->board_id[0] = v0.board_id; 
       st->latched_pps_time = 0; 
       break; 
+    case 2: 
+      wanted = sizeof(nuphase_status_v2_t); 
+      got = generic_read(gf, wanted, &v2); 
+      cksum = stupid_fletcher16(wanted, &v2); 
+      memcpy(st,&v2, sizeof(v2)); 
+      break;
     case NUPHASE_STATUS_VERSION: //this is the most recent status!
       wanted = sizeof(nuphase_status_t); 
       got = generic_read(gf, wanted, st); 
@@ -708,7 +728,7 @@ int nuphase_status_print(FILE *f, const nuphase_status_t *st)
   time_t t = st->readout_time;
   tim = gmtime((time_t*) &t); 
   strftime(timstr,sizeof(timstr), "%Y-%m-%d %H:%M:%S", tim);  
-  fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id, timstr, st->readout_time_ns); 
+  fprintf(f,"NuPhase Board 0x%x Status (read at %s.%09d UTC)\n", st->board_id[0], timstr, st->readout_time_ns); 
   fprintf(f,"latched pps: %"PRIu64"  \n", st->latched_pps_time); 
 
   fprintf(f,"\t which \t 0.1 Hz, gated 0.1Hz, 1 Hz, threshold\n"); 
@@ -716,6 +736,10 @@ int nuphase_status_print(FILE *f, const nuphase_status_t *st)
   for (i = 0; i < NP_NUM_BEAMS; i++)
   {
     fprintf(f,"\tBEAM %d: \t%u \t%u \t%u \t%u \n",i, st->beam_scalers[SCALER_SLOW][i], st->beam_scalers[SCALER_SLOW_GATED][i], st->beam_scalers[SCALER_FAST][i], st->trigger_thresholds[i] ); 
+  }
+  if (st->board_id[1])
+  {
+  fprintf(f,"\tSURFACE: \t%u \t%u \t%u\n", st->surface_scalers[SCALER_SLOW], st->surface_scalers[SCALER_SLOW_GATED], st->surface_scalers[SCALER_FAST]); 
   }
   return 0; 
 }

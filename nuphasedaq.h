@@ -29,7 +29,9 @@ struct nuphase_dev;
 /** typedef for device */ 
 typedef struct nuphase_dev nuphase_dev_t; 
 
+/* the masks to read, = 0xf means surface */ 
 typedef uint8_t nuphase_buffer_mask_t; 
+const nuphase_buffer_mask_t NUPHASE_SURFACE_MASK = 0xf; 
 
 typedef struct nuphase_trigger_enable
 {
@@ -92,6 +94,23 @@ typedef enum nuphase_reset_type
   NP_RESET_GLOBAL    //! everything 
 } nuphase_reset_t; 
 
+
+
+#define SURFACE_ANTENNA_MASK_VPOL_0 0x1
+#define SURFACE_ANTENNA_MASK_VPOL_1 0x2
+#define SURFACE_ANTENNA_MASK_VPOL_2 0x4 
+#define SURFACE_ANTENNA_MASK_HPOL_0 0x8
+#define SURFACE_ANTENNA_MASK_LPDA_0 0x10
+#define SURFACE_ANTENNA_MASK_LPDA_2 0x20
+
+//note that the pretrigger is defined elsewhere! 
+typedef struct nuphase_surface_setup
+{
+  uint8_t vpp_threshold; 
+  uint8_t coincident_window_length; //10.7ns * value
+  uint8_t antenna_mask; //see above surface antenna masks
+  uint8_t n_coincident_channels; //1-6, 0 interpretted as 1
+} nuphase_surface_setup_t;
 
 
 /** \brief Open a nuphase phased array board and initializes it. 
@@ -165,6 +184,8 @@ uint8_t nuphase_get_board_id(const nuphase_dev_t * d, nuphase_which_board_t whic
 /** Set the length of the readout buffer. Can be anything between 0 and 2048. (default is 624). */ 
 void nuphase_set_buffer_length(nuphase_dev_t *d, uint16_t buffer); 
 
+void nuphase_set_surface_buffer_length(nuphase_dev_t *d, uint16_t buffer); 
+
 /** Retrieves the current buffer length */ 
 uint16_t nuphase_get_buffer_length(const nuphase_dev_t *d); 
 
@@ -183,9 +204,14 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
  * Will busy poll nuphase_check_buffers (which) 
  *
  * If ready is passed, it will be filled after done waiting. Normally it should
- * be non-zero unless interrupted or the timeout is reached. 
+ * be non-zero unless interrupted or the timeout is reached or we also wait for surface triggers. 
  *
  * A timeout may be passed in seconds if you don't want to wait forever (and who wouldn't?) 
+ *
+ * If ths slave board exists, we will always wait on the slave board
+ *
+ * If surface_wait is non-zero, then nuphase_wait will also check surface buffers and return in that case (but non-surface buffers
+ * are always checked in first). 
  *
  * The "correct way" to interrupt this by using nuphase_cancel_wait (either
  * from a signal handler or another thread). 
@@ -201,12 +227,13 @@ int nuphase_calpulse(nuphase_dev_t * d, unsigned state) ;
  * Returns 0 on success,  
  * 
  **/
-int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds, nuphase_which_board_t which); 
+int nuphase_wait(nuphase_dev_t *d, nuphase_buffer_mask_t * ready, float timeout_seconds, int * surface_wait); 
 
 /** Checks to see which buffers are ready to be read
  * If next_buffer is non-zero, will fill it with what the board things the next buffer to read is. 
+ * if surface non-zero, will check surface as well; 
  * */ 
-nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buffer, nuphase_which_board_t which);
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t *d, uint8_t*  next_buffer, nuphase_which_board_t which, int * surface);
 
 /** Retrieve the firmware info */
 int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo, nuphase_which_board_t which); 
@@ -214,8 +241,9 @@ int nuphase_fwinfo(nuphase_dev_t *d, nuphase_fwinfo_t* fwinfo, nuphase_which_boa
 
 
 /** Fills in the status struct. 
+ * if read_surface is 1, the surface scalers will also be read from the SLAVE board (normally scalers are read from the MASTER)
  **/ 
-int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat, nuphase_which_board_t which); 
+int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat, int read_surface); 
 
 /**
  * Highest level read function. This will wait for data, read it into the 
@@ -241,17 +269,21 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * stat, nuphase_which
   \endverbatim
  *
  *
- * Returns the number of events read. 
+ * May also wait for surface events if the surface pointers are non-zero. 
+ *
+ * Returns the number of events read, excluding surface, which is passed to surface_read if non_zero . 
  *
  **/ 
 int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d, 
-                                              nuphase_header_t (*headers_master)[NP_NUM_BUFFER], 
-                                              nuphase_event_t  (*events_master)[NP_NUM_BUFFER]
-                                              
+                                              nuphase_header_t (*headers)[NP_NUM_BUFFER], 
+                                              nuphase_event_t  (*events)[NP_NUM_BUFFER], 
+                                              nuphase_header_t * surface_header,
+                                              nuphase_event_t  * surface_event, 
+                                              int * surface_read
                                               ) ; 
 
 
-/** Read a single event, filling header and event, and also clearing the buffer and increment event number. Does not check if there is anyting available in the buffer.  
+/** Read a single event, filling header and event, and also clearing the buffer and increment event number. Does not check if there is anything available in the buffer.  
  *
  * @param d the device handle
  * @param buffer the buffer to read
@@ -266,7 +298,10 @@ int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer,
 
 /** Reads buffers specified by mask. An event and header  must exist for each
  * buffer in the array pointed to by header_arr and event_arr ( Clears each buffer after reading and increments event numbers
- * appropriately).  Returns 0 on success. 
+ * appropriately).
+ *
+ * Note that a mask value of SURFACE_MASK is special and will only read the surface array. 
+ * Returns 0 on success. 
  *
  **/
 int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, 
@@ -277,6 +312,8 @@ int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask,
  * buffer in the array pointed to by header_arr and event_arr ( Clears each
  * buffer after reading and increments event numbers appropriately).  Returns 0
  * on success. 
+ *
+ * Note that a mask value of SURFACE_MASK is special and will only read the surface array. 
  **/
 int nuphase_read_multiple_ptr(nuphase_dev_t *d, nuphase_buffer_mask_t mask, 
                               nuphase_header_t **header_ptr_arr,  nuphase_event_t ** event_ptr_arr
@@ -370,9 +407,11 @@ uint16_t nuphase_get_channel_mask(nuphase_dev_t *d);
 
 /** Sets the channel read mask */ 
 int nuphase_set_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t board, uint8_t mask); 
+int nuphase_set_channel_read_mask_surface(nuphase_dev_t *d, uint8_t mask); 
 
 /** Gets the channel read mask */ 
 uint8_t nuphase_get_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t board); 
+uint8_t nuphase_get_channel_read_mask_surface(nuphase_dev_t *d); 
 
 
 /** Set the trigger enables */ 
@@ -391,13 +430,13 @@ int nuphase_set_trigger_holdoff(nuphase_dev_t *d, uint16_t holdoff);
 uint16_t nuphase_get_trigger_holdoff(nuphase_dev_t *d); 
 
 /** Set the pretrigger (0-7). Does it for both boards*/ 
-int nuphase_set_pretrigger(nuphase_dev_t *d, uint8_t pretrigger); 
+int nuphase_set_pretrigger(nuphase_dev_t *d, uint8_t pretrigger, uint8_t surface_pretrigger); 
 
 /** Get the pretrigger (0-7) (should be the same for both boards).
  *
  * This just returns the cached value, so it's possible that it was changed from underneath us. 
  * */ 
-uint8_t nuphase_get_pretrigger(const nuphase_dev_t *d); 
+uint8_t nuphase_get_pretrigger(const nuphase_dev_t *d, uint8_t* surface_pretrigger); 
 
 /** Set the external output config */ 
 int nuphase_configure_trigger_output(nuphase_dev_t * d, nuphase_trigger_output_config_t config); 
@@ -429,6 +468,19 @@ int nuphase_get_trigger_delays(nuphase_dev_t *d, uint8_t * delays);
 int nuphase_set_min_threshold(nuphase_dev_t *d, uint32_t min_threshold); 
 
 
+// surface stuff
+/** This turns off the surface channel ADC's. Must reset to clear */
+int nuphase_surface_powerdown(nuphase_dev_t *d) ; 
+
+/** Read a surface event, clearing the buffer. Does not check if anything is actually available! */ 
+int nuphase_surface_read_event(nuphase_dev_t *d, nuphase_header_t * head,nuphase_event_t *ev); 
+
+/** Check if a surface trigger is available. 
+ * This returns 1 if one is, 0 if not, -1 on error */ 
+int nuphase_surface_check_buffer(nuphase_dev_t *d); 
+
+// Configure the surface setup
+int nuphase_configure_surface(nuphase_dev_t *d, const nuphase_surface_setup_t * s);
 
 
 #endif

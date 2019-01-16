@@ -22,6 +22,7 @@
 #define NP_SPI_BYTES  NP_WORD_SIZE
 #define NP_NUM_MODE 4
 #define NP_NUM_REGISTER 128
+#define NP_NUM_SURFACE_CHANNELS 6 
 #define BUF_MASK 0xf
 #define MAX_PRETRIGGER 8 
 #define BOARD_CLOCK_HZ 1500000000/16 
@@ -72,6 +73,8 @@ typedef enum
   REG_CALPULSE           = 0x2a, //cal pulse
   REG_LATCHED_PPS_LOW    = 0x2c, 
   REG_LATCHED_PPS_HIGH   = 0x2d, 
+  REG_SURFACE_1          = 0x2e, 
+  REG_SURFACE_2          = 0x2f, 
   REG_CHANNEL_MASK       = 0x30, 
   REG_ATTEN_012          = 0x32, 
   REG_ATTEN_345          = 0x33, 
@@ -130,10 +133,12 @@ struct nuphase_dev
   uint64_t readout_number_offset; 
   uint64_t event_counter;  // should match device...we'll keep this to complain if it doesn't
   uint16_t buffer_length; 
+  uint16_t surface_buffer_length; 
   pthread_mutex_t mut; //mutex for the SPI (not for the gpio though). Only used if enable_locking is true
   pthread_mutex_t wait_mut; //mutex for the waiting. Only used if enable_locking is true
   uint8_t board_id[2]; 
   uint8_t channel_read_mask[2];// read mask... right now it's always 0xf, but we can make it configurable later
+  uint8_t surface_channel_read_mask; 
   volatile int cancel_wait; // needed for signal handlers 
   struct timespec start_time; //the time of the last clock reset
 
@@ -147,6 +152,7 @@ struct nuphase_dev
   int delay_us; 
 
   uint8_t pretrigger; 
+  uint8_t surface_pretrigger; 
 
   // store event / header used for calibration here in case we want it later? 
   nuphase_event_t calib_ev;
@@ -162,6 +168,10 @@ struct nuphase_dev
   int current_mode[2]; 
 
   bbb_gpio_pin_t * gpio_pin; 
+
+  // this needs to be cached as it's sent to the board when switching modes
+  int surface_num_coincident_channels; 
+  uint64_t surface_event_counter; 
   
 }; 
 
@@ -225,6 +235,7 @@ static int do_read(int fd, uint8_t * p)
 
 
 #define N_SCALER_REGISTERS  (NP_NUM_SCALERS * (1 + NP_NUM_BEAMS)/2) 
+#define N_PICK_SCALER (2 + N_SCALER_REGISTERS)
 
 // all possible buffers we might batch
 static uint8_t buf_mode[NP_NUM_MODE][NP_SPI_BYTES];
@@ -234,8 +245,11 @@ static uint8_t buf_buffer[NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_chunk[NP_NUM_CHUNK][NP_SPI_BYTES];
 static uint8_t buf_ram_addr[NP_ADDRESS_MAX][NP_SPI_BYTES];
 static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
+static uint8_t buf_clear_surface[NP_SPI_BYTES] = {REG_CLEAR, 1,0,0}; ;
 static uint8_t buf_reset_buf[NP_SPI_BYTES] = {REG_CLEAR,0,1,0};
-static uint8_t buf_pick_scaler[N_SCALER_REGISTERS][NP_SPI_BYTES]; 
+static uint8_t buf_pick_scaler[N_PICK_SCALER][NP_SPI_BYTES]; 
+static uint8_t buf_change_to_surface[1+NP_NUM_SURFACE_CHANNELS][NP_SPI_BYTES]; 
+static uint8_t buf_change_to_deep[1+NP_NUM_SURFACE_CHANNELS][NP_SPI_BYTES]; 
 
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
 
@@ -262,6 +276,22 @@ void fillBuffers()
     buf_mode[i][3] = i; 
   }
 
+  memset(buf_change_to_surface, 0, sizeof(buf_change_to_surface));
+  memset(buf_change_to_deep, 0, sizeof(buf_change_to_deep));
+  for (i = 0; i <= NP_NUM_SURFACE_CHANNELS; i++) 
+  {
+    buf_change_to_surface[i][0] = REG_SURFACE_2; 
+    buf_change_to_deep[i][0] = REG_SURFACE_2; 
+
+    buf_change_to_surface[i][1] = 1; 
+    buf_change_to_deep[i][1] = 1; 
+
+    buf_change_to_surface[i][2] = 1; 
+    buf_change_to_deep[i][2] = 0; 
+
+    buf_change_to_surface[i][3] = i == 0 ? 0 : i-1; 
+    buf_change_to_deep[i][3] = i == 0 ? 0 : i-1; 
+  }
 
   memset(buf_set_read_reg,0,sizeof(buf_set_read_reg)); 
   for (i = 0; i < NP_NUM_REGISTER; i++) 
@@ -306,7 +336,7 @@ void fillBuffers()
   }
 
   memset(buf_pick_scaler,0,sizeof(buf_pick_scaler)); 
-  for (i = 0; i < N_SCALER_REGISTERS; i++)
+  for (i = 0; i < N_PICK_SCALER; i++)
   {
     buf_pick_scaler[i][0]=REG_PICK_SCALER; 
     buf_pick_scaler[i][3]=i;  
@@ -559,8 +589,12 @@ int nuphase_read_raw(nuphase_dev_t *d,  uint8_t buffer, uint8_t channel, uint8_t
   USING(d);  //have to lock for the duration otherwise channel /read mode may be changed form underneath us.  
             // we don't lock before these because there is no way we sent enough transfers to trigger a read 
             //
+
+  /*
   ret += buffer_append(d,which, buf_mode[MODE_WAVEFORMS], 0);  if (ret) return 0; 
   d->current_mode[which] = MODE_WAVEFORMS; 
+  */ 
+
   ret += buffer_append(d,which, buf_buffer[buffer], 0);  if (ret) return 0; 
   d->current_buf[which] = buffer; 
   ret += buffer_append(d,which, buf_channel[channel], 0);  if (ret) return 0; 
@@ -706,13 +740,14 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->spi_clock = SPI_CLOCK; 
   dev->cancel_wait = 0; 
   dev->event_counter = 0; 
+  dev->surface_event_counter = 0; 
   dev->next_read_buffer = 0; 
   dev->cs_change =NP_CS_CHANGE; 
   dev->delay_us =NP_DELAY_USECS; 
   dev->current_buf[0] = -1; 
   dev->current_buf[1] = -1; 
-  dev->current_mode[0] = -1; 
-  dev->current_mode[1] = -1; 
+//  dev->current_mode[0] = -1; 
+//  dev->current_mode[1] = -1; 
 
   dev->min_threshold = 5000; 
 
@@ -729,8 +764,10 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   // if this is still running in 20 years, someone will have to fix the y2k38 problem 
   dev->readout_number_offset = ((uint64_t)time(0)) << 32; 
   dev->buffer_length = 624; 
+  dev->surface_buffer_length = 624; 
   dev->channel_read_mask[0] = 0xff; 
   dev->channel_read_mask[1] = fd[1] ? 0xff : 0; 
+  dev->surface_channel_read_mask = 0xfc; 
   dev->board_id[0] = board_id_counter++; 
   dev->board_id[1] = fd[1] ? board_id_counter++ : 0; 
 
@@ -771,6 +808,10 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
     return 0; 
   }
 
+  dev->pretrigger = 4; 
+  dev->surface_pretrigger = 4; 
+  dev->surface_num_coincident_channels = 3;
+
   return dev; 
 
 }
@@ -789,6 +830,14 @@ uint8_t nuphase_get_board_id(const nuphase_dev_t * d, nuphase_which_board_t whic
 void nuphase_set_readout_number_offset(nuphase_dev_t * d, uint64_t offset) 
 {
   d->readout_number_offset = offset; 
+}
+
+
+void nuphase_set_surface_buffer_length(nuphase_dev_t * d, uint16_t length)
+{
+  USING(d); //definitely do not want to change this mid readout 
+  d->surface_buffer_length = length; 
+  DONE(d); 
 }
 
 
@@ -898,7 +947,7 @@ void nuphase_cancel_wait(nuphase_dev_t *d)
   d->cancel_wait = 1;  
 }
 
-int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float timeout, nuphase_which_board_t which) 
+int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float timeout, int * surface_wait) 
 {
 
   //If locking is enabled and a second thread attempts
@@ -931,18 +980,21 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 
 
   nuphase_buffer_mask_t something = 0; 
+  int something_surface = 0;
   struct timespec start; 
   if (timeout >0) clock_gettime(CLOCK_MONOTONIC, &start); 
 
+  nuphase_which_board_t which = NBD(d) > 1 ? SLAVE : MASTER;
   float waited = 0; 
   // keep trying until we either get something, are cancelled, or exceed our timeout (if we have a timeout) 
-  while(!something && (timeout <= 0 || waited < timeout))
+  while(!something && !something_surface  &&  (timeout <= 0 || waited < timeout))
   {
 
-      something = nuphase_check_buffers(d,&d->hardware_next,which); 
+      something = nuphase_check_buffers(d,&d->hardware_next,which, surface_wait ? &something_surface : 0); 
+
 
       if (d->cancel_wait) break; 
-      if (!something)
+      if (!something && something_surface <=0)
       {
 
         if(d->poll_interval)
@@ -965,6 +1017,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
   int interrupted = d->cancel_wait; //were we interrupted? 
 
   if (ready_buffers) *ready_buffers = something;  //save to ready
+  if (surface_wait)  *surface_wait = something_surface; //save 
   d->cancel_wait = 0;  //clear the wait
   if (d->enable_locking) pthread_mutex_unlock(&d->wait_mut);   //unlock the mutex
   return interrupted ? EINTR : 0; 
@@ -974,7 +1027,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 
 
 
-nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, nuphase_which_board_t which) 
+nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, nuphase_which_board_t which, int * surface) 
 {
 
   uint8_t result[NP_SPI_BYTES]; 
@@ -987,27 +1040,32 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
   DONE(d); 
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (next) *next = (result[2] >> 4) & 0x3; 
+  if (surface) *surface = !!(result[3]  & 10); 
   return mask; 
 }
 
 
-int nuphase_set_pretrigger(nuphase_dev_t * d, uint8_t pretrigger)
+int nuphase_set_pretrigger(nuphase_dev_t * d, uint8_t pretrigger, uint8_t pretrigger_surface)
 {
-  uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, 0, pretrigger & 0x7}; 
+  uint8_t pretrigger_buf[] = { REG_PRETRIGGER, 0, pretrigger_surface &0x7, pretrigger & 0x7}; 
   int ret = synchronized_command(d, pretrigger_buf,0,0,0); 
-  if (!ret) d->pretrigger = pretrigger; 
+  if (!ret)
+  {
+    d->pretrigger = pretrigger & 0x7;; 
+    d->surface_pretrigger = pretrigger_surface & 0x7;; 
+  }
   return ret; 
 }
 
-uint8_t nuphase_get_pretrigger(const nuphase_dev_t * d)
+uint8_t nuphase_get_pretrigger(const nuphase_dev_t * d, uint8_t *surface )
 {
+  if (surface) *surface = d->surface_pretrigger; 
   return d->pretrigger; 
 }
 
 
 
 int nuphase_set_channel_mask(nuphase_dev_t * d, uint8_t mask) 
-
 {
     uint8_t channel_mask_buf_master[NP_SPI_BYTES]= { REG_CHANNEL_MASK, 0, 0, mask & 0xff}; 
 
@@ -1318,19 +1376,33 @@ uint16_t nuphase_get_trigger_holdoff(nuphase_dev_t *d)
 //indirection! 
 int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d, 
                                       nuphase_header_t (*headers)[NP_NUM_BUFFER], 
-                                      nuphase_event_t  (*events)[NP_NUM_BUFFER])  
+                                      nuphase_event_t  (*events)[NP_NUM_BUFFER],
+                                      nuphase_header_t * surface_header,
+                                      nuphase_event_t  * surface_event,
+                                      int * surface_read)  
 {
   nuphase_buffer_mask_t mask; ; 
-  nuphase_wait(d,&mask,-1,MASTER); 
+  int surface; 
+  int ret = 0; 
+
+  nuphase_wait(d,&mask,-1,(surface_header && surface_event) ? &surface : 0 ); 
   if (mask) 
   {
-    int ret; 
+    int check; 
 //    printf("dev->next_read_buffer: %d, mask after waiting: %x, hw_next: %d\n",d->next_read_buffer, mask, d->hardware_next); 
-    ret = nuphase_read_multiple_array(d,mask,&(*headers)[0], &(*events)[0]); 
-    if (!ret) return __builtin_popcount(mask); 
-    else return -1; 
+    check = nuphase_read_multiple_array(d,mask,&(*headers)[0], &(*events)[0]); 
+    if (!check) ret+= __builtin_popcount(mask); 
+    else ret = -1;
   }
-  return 0; 
+  if (surface) 
+  {
+    int check;
+    check = nuphase_read_multiple_ptr(d,NUPHASE_SURFACE_MASK,&surface_header, &surface_event);
+    if (surface_read) *surface_read = check == 0 ? 1 : -1; 
+  }
+  else if (surface_read) *surface_read = 0; 
+
+  return ret; 
 }
 
 //yay more indirection!
@@ -1340,10 +1412,18 @@ int nuphase_read_single(nuphase_dev_t *d, uint8_t buffer, nuphase_header_t * hea
   return nuphase_read_multiple_ptr(d,mask,&header, &event); 
 
 }
+//yay more indirection!
+int nuphase_surface_read_event(nuphase_dev_t *d, nuphase_header_t * header, nuphase_event_t * event)
+{
+  nuphase_buffer_mask_t mask = NUPHASE_SURFACE_MASK; 
+  return nuphase_read_multiple_ptr(d,mask,&header, &event); 
+
+}
 
 //woohoo, even more indirection. 
 int nuphase_read_multiple_array(nuphase_dev_t *d, nuphase_buffer_mask_t mask, nuphase_header_t * headers,  nuphase_event_t * events) 
 {
+  if (mask == NUPHASE_SURFACE_MASK) return nuphase_read_multiple_ptr(d,mask,&headers, &events); 
   nuphase_event_t * ev_ptr_array[NP_NUM_BUFFER]; 
   nuphase_header_t * hd_ptr_array[NP_NUM_BUFFER]; 
   int i; 
@@ -1384,17 +1464,21 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
   int iibuf; 
   int ibd; 
 
+  int doing_surface = (mask == NUPHASE_SURFACE_MASK); 
+  int nbufs = doing_surface ? 1: __builtin_popcount(mask); 
 
-  for (iibuf = 0; iibuf < __builtin_popcount(mask); iibuf++)
+
+  for (iibuf = 0; iibuf < nbufs ; iibuf++)
   {
 
-    ibuf = d->next_read_buffer; 
+    ibuf = doing_surface ? 0 : d->next_read_buffer; 
     hd[iout]->sync_problem = 0; 
-    for (ibd = 0; ibd < NBD(d); ibd++)
+
+    for (ibd = doing_surface; ibd < NBD(d); ibd++)
     {
 
       //we are not reading this event right now
-      if ( (mask & (1 << ibuf)) == 0)
+      if ( !doing_surface && (mask & (1 << ibuf)) == 0)
       {
         fprintf(stderr,"Sync issue? d->next_read_buffer=%d, mask=0x%x, hardware next: %d\n", d->next_read_buffer, mask, d->hardware_next); 
         easy_break_point(); 
@@ -1408,16 +1492,27 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       //grab the metadata 
       //set the buffer 
       USING(d); 
+
+      if (doing_surface) 
+      {
+        buffer_append(d, ibd, buf_change_to_surface[d->surface_num_coincident_channels],0); 
+      }
+
+
       if (ibd == 0) 
       {
         d->event_counter++; 
         d->next_read_buffer = (d->next_read_buffer + 1) %NP_NUM_BUFFER; 
       }
+      else if (doing_surface) 
+      {
+        d->surface_event_counter++; 
+      }
+
       CHK(buffer_append(d, ibd,  buf_buffer[ibuf],0)) 
       d->current_buf[ibd] = ibuf; 
 
       /**Grab metadata! */ 
-      //switch to register mode  
 
       //we will pretend like we are bigendian so we can just call be64toh on the u64
       CHK(append_read_register(d,ibd,REG_EVENT_COUNTER_LOW, (uint8_t*) &event_counter[0])) 
@@ -1429,7 +1524,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       CHK(append_read_register(d,ibd,REG_DEADTIME, (uint8_t*) &deadtime)) 
       CHK(append_read_register(d,ibd,REG_TRIG_INFO, (uint8_t*) &tinfo)) 
 
-      if (ibd == 0)  // these don't make sense for a slave 
+      if (ibd == 0)  // these don't make sense for a slave or suurface
       {
         CHK(append_read_register(d,ibd,REG_TRIG_MASKS,(uint8_t*) &tmask)) 
         for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
@@ -1467,7 +1562,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
       uint64_t big_event_counter = event_counter[0] + (event_counter[1] << 24); 
 
-      if (d->event_counter !=  big_event_counter)
+      if (!doing_surface && d->event_counter !=  big_event_counter)
       {
         fprintf(stderr,"Event counter mismatch!!! (bd: %s sw: %"PRIu64", hw: %"PRIu64")\n", ibd ? "SLAVE" : "MASTER" , d->event_counter, big_event_counter); 
         easy_break_point(); 
@@ -1489,17 +1584,17 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       hd[iout]->readout_time[ibd] = now.tv_sec; 
       hd[iout]->readout_time_ns[ibd] = now.tv_nsec; 
       hd[iout]->trig_time[ibd] =trig_time[0] + (trig_time[1] << 24); 
-      hd[iout]->channel_read_mask[ibd] = d->channel_read_mask[ibd]; 
+      hd[iout]->channel_read_mask[ibd] = doing_surface ? d->surface_channel_read_mask : d->channel_read_mask[ibd]; 
       hd[iout]->deadtime[ibd] = be32toh(deadtime) & 0xffffff; 
       hd[iout]->board_id[ibd] = d->board_id[ibd]; 
  
       //values that we only save for the master
-      if (ibd == 0)
+      if (ibd == 0 || doing_surface)
       {
-        hd[iout]->event_number = d->readout_number_offset + big_event_counter; 
+        hd[iout]->event_number =  d->readout_number_offset + big_event_counter; 
         hd[iout]->trig_number = trig_counter[0] + (trig_counter[1] << 24); 
         hd[iout]->buffer_length = d->buffer_length; 
-        hd[iout]->pretrigger_samples = d->pretrigger* 8 * 16; //TODO define these constants somewhere
+        hd[iout]->pretrigger_samples = (doing_surface ? d->surface_pretrigger : d->pretrigger)* 8 * 16; //TODO define these constants somewhere
         hd[iout]->approx_trigger_time= d->start_time.tv_sec + hd[iout]->trig_time[ibd] / BOARD_CLOCK_HZ; 
         hd[iout]->approx_trigger_time_nsecs = d->start_time.tv_nsec + (hd[iout]->trig_time[ibd] % BOARD_CLOCK_HZ) *(1.e9 / BOARD_CLOCK_HZ); 
         if (hd[iout]->approx_trigger_time_nsecs > 1e9) 
@@ -1525,7 +1620,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
 
         //event stuff
-        ev[iout]->buffer_length = d->buffer_length; 
+        ev[iout]->buffer_length = doing_surface ? d->surface_buffer_length : d->buffer_length; 
         ev[iout]->event_number = hd[iout]->event_number; 
  
       }
@@ -1567,51 +1662,66 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       //now start to read the data 
       for (ichan = 0; ichan < NP_NUM_CHAN; ichan++)
       {
-        if ( d->channel_read_mask[ibd] & ( 1 << ichan) )
+        if ( (doing_surface  && ( d->surface_channel_read_mask & (1 << ichan) ) )
+             || (d->channel_read_mask[ibd] & ( 1 << ichan) ) )
         {
           USING(d);  
+          /*
           if (d->current_mode[ibd] != MODE_WAVEFORMS)
           {
             CHK(buffer_append(d,ibd, buf_mode[MODE_WAVEFORMS],0))
             d->current_mode[ibd] = MODE_WAVEFORMS; 
           }
+          */
 
-          if (d->current_buf[ibd] != ibuf)
+          if (!doing_surface && d->current_buf[ibd] != ibuf)
           {
             CHK(buffer_append(d,ibd, buf_buffer[ibuf],0))
           }
 
-          if (d->channel_read_mask[ibd] & (1 << ichan)) //TODO is this backwards?!??? 
-          {
-            CHK(buffer_append(d,ibd, buf_channel[ichan],0)) 
-            CHK(loop_over_chunks_half_duplex(d,ibd, d->buffer_length / (NP_SPI_BYTES * NP_NUM_CHUNK),1, &ev[iout]->data[ibd][ichan][0]))
-          }
+          CHK(buffer_append(d,ibd, buf_channel[ichan],0)) 
+          CHK(loop_over_chunks_half_duplex(d,ibd, ( doing_surface ? d->surface_buffer_length : d->buffer_length)  / (NP_SPI_BYTES * NP_NUM_CHUNK),1, &ev[iout]->data[ibd][ichan][0]))
+
+          
           DONE(d); 
         }
         else
         {
-          memset(&ev[iout]->data[ibd][ichan][0], 0 , d->buffer_length); 
+          memset(&ev[iout]->data[ibd][ichan][0], 0 , doing_surface ? d->surface_buffer_length : d->buffer_length); 
         }
       }
 
 
-      //zero out things that don't make sense if there is no slave
-      if (NBD(d) < 2) 
-      {
-        hd[iout]->readout_time[1] = 0; 
-        hd[iout]->readout_time_ns[1] = 0; 
-        hd[iout]->trig_time[1] = 0; 
-        hd[iout]->deadtime[1] = 0; 
-        hd[iout]->board_id[1] = 0; 
-        memset(ev[iout]->data[1],0, NP_NUM_CHAN * NP_MAX_WAVEFORM_LENGTH); 
-
-      }
-
       USING(d); 
       CHK(buffer_send(d,ibd)); 
       DONE(d); 
+
+      //zero out things that don't make sense if there is no slave or doing surface
+      if (NBD(d) < 2 || doing_surface) 
+      {
+        hd[iout]->readout_time[1-doing_surface] = 0; 
+        hd[iout]->readout_time_ns[1-doing_surface] = 0; 
+        hd[iout]->trig_time[1-doing_surface] = 0; 
+        hd[iout]->deadtime[1-doing_surface] = 0; 
+        hd[iout]->board_id[1-doing_surface] = 0; 
+        ev[iout]->board_id[1-doing_surface] = 0; 
+        memset(ev[iout]->data[1-doing_surface],0, NP_NUM_CHAN * NP_MAX_WAVEFORM_LENGTH); 
+      }
+
     }
-    mark_buffers_done(d, 1 << ibuf); 
+
+    if (doing_surface) 
+    {
+      USING(d); 
+      buffer_append(d,SLAVE, buf_change_to_deep[d->surface_num_coincident_channels],0); 
+      buffer_append(d,SLAVE, buf_clear_surface,0); 
+      buffer_send(d,SLAVE); 
+      DONE(d); 
+    }
+    else  
+    {
+      mark_buffers_done(d, 1 << ibuf); 
+    }
     iout++; 
 
   }
@@ -1627,9 +1737,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
 int nuphase_clear_buffer(nuphase_dev_t *d, nuphase_buffer_mask_t mask) 
 {
-  USING(d); 
   int ret = mark_buffers_done(d,mask); 
-  DONE(d); 
   return ret; 
 }
 
@@ -1655,7 +1763,7 @@ int nuphase_read(nuphase_dev_t *d,uint8_t* buffer, nuphase_which_board_t which)
 
 
 
-int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_board_t which) 
+int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, int surface) 
 {
   //TODO: fill in deadtime when I figure out how. 
   int i; 
@@ -1665,26 +1773,42 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
 
   uint8_t latched_pps[2][NP_SPI_BYTES]; 
 
-  st->board_id = d->board_id[which]; 
+  st->board_id[0] = d->board_id[MASTER]; 
+  st->board_id[1] =surface ? d->board_id[SLAVE] : 0; 
 
   USING(d); 
+  /*
   ret+=buffer_append(d, which,buf_mode[MODE_REGISTER],0); 
   d->current_mode[which] = MODE_REGISTER; 
-  ret+=buffer_append(d,which, buf_update_scalers,0); 
+  */
+  ret+=buffer_append(d,MASTER, buf_update_scalers,0); 
 
   for (i = 0; i < N_SCALER_REGISTERS; i++) 
   {
-    ret+=buffer_append(d,which, buf_pick_scaler[i],0); 
-    ret+=append_read_register(d,which, REG_SCALER_READ, scaler_registers[i]); 
+    ret+=buffer_append(d,MASTER, buf_pick_scaler[i],0); 
+    ret+=append_read_register(d,MASTER, REG_SCALER_READ, scaler_registers[i]); 
   }
 
   //also add the latched time stamp 
   
-  ret += append_read_register(d,which, REG_LATCHED_PPS_LOW, latched_pps[0]); 
-  ret += append_read_register(d,which, REG_LATCHED_PPS_HIGH, latched_pps[1]); 
+  ret += append_read_register(d,MASTER, REG_LATCHED_PPS_LOW, latched_pps[0]); 
+  ret += append_read_register(d,MASTER, REG_LATCHED_PPS_HIGH, latched_pps[1]); 
   
+  ret+= buffer_send(d,MASTER); 
   clock_gettime(CLOCK_REALTIME, &now); 
-  ret+= buffer_send(d,which); 
+
+  uint8_t surface_scaler_registers[2][NP_SPI_BYTES]; 
+  //now get the surface scalers, if applicable
+  if (surface) 
+  {
+
+    buffer_append(d, SLAVE, buf_update_scalers,0);
+    buffer_append(d, SLAVE, buf_pick_scaler[24],surface_scaler_registers[0]);
+    buffer_append(d, SLAVE, buf_pick_scaler[25],surface_scaler_registers[1]);
+    ret += buffer_send(d,SLAVE); 
+  }
+
+
   DONE(d); 
 
   ret+= nuphase_get_thresholds(d, &st->trigger_thresholds[0]); 
@@ -1713,6 +1837,30 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, nuphase_which_b
       st->beam_scalers[which_scaler][2*which_channel] = second; 
     }
   }
+
+  if (surface) 
+  {
+    for (i = 0; i < 2; i++) 
+    {
+      uint16_t first = ((uint16_t)surface_scaler_registers[i][3])  |  (((uint16_t) surface_scaler_registers[i][2] & 0xf ) << 8); 
+      uint16_t second =((uint16_t)(surface_scaler_registers[i][2] >> 4)) |  (((uint16_t) surface_scaler_registers[i][1] ) << 4); 
+
+      if (i == 0) 
+      {
+        st->surface_scalers[0] = second;
+      }
+      else
+      {
+        st->surface_scalers[1] = first;
+        st->surface_scalers[2] = second;
+      }
+    }
+  }
+  else
+  {
+    memset(st->surface_scalers, 0, sizeof(st->surface_scalers)); 
+  }
+
 
   st->latched_pps_time = latched_pps[0][3]; 
   st->latched_pps_time |= ((uint64_t) latched_pps[0][2]) << 8; 
@@ -2209,6 +2357,19 @@ int nuphase_set_min_threshold(nuphase_dev_t * d, uint32_t min)
 }
 
 
+int nuphase_set_channel_read_mask_surface(nuphase_dev_t * d,  uint8_t mask) 
+{
+  if (NBD(d) < 2) return 1; 
+  d->surface_channel_read_mask = mask;
+  return 0; 
+}
+
+uint8_t nuphase_get_channel_read_mask_surface(nuphase_dev_t *d) 
+{
+  return d->surface_channel_read_mask; 
+
+}
+
 int nuphase_set_channel_read_mask(nuphase_dev_t * d, nuphase_which_board_t bd, uint8_t mask) 
 {
   if (bd < NBD(d))
@@ -2226,6 +2387,54 @@ uint8_t nuphase_get_channel_read_mask(nuphase_dev_t *d, nuphase_which_board_t bd
     return d->channel_read_mask[bd]; 
   }
   return 0; 
+}
+
+int nuphase_surface_powerdown(nuphase_dev_t * d) 
+{
+  int ret;
+  const uint8_t powerdown_bytes[NP_SPI_BYTES] = { REG_SURFACE_2, 0, 0, 0} ;
+  if (NBD(d) < 2) return 1; 
+  USING(d); 
+  ret = do_write(d->fd[SLAVE], powerdown_bytes);
+  DONE(d); 
+  return ret; 
+}
+
+int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s)
+{
+  int ret; 
+  uint8_t buf1[NP_SPI_BYTES] = { REG_SURFACE_1, s->antenna_mask, s->coincident_window_length, s->vpp_threshold};
+  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, s->n_coincident_channels };
+  if (NBD(d) < 2) return 1; 
+
+  USING(d); 
+  ret =buffer_append(d,SLAVE,buf1,0);
+  ret+= buffer_append(d,SLAVE,buf2,0);
+  ret+=buffer_send(d,SLAVE); 
+  DONE(d); 
+
+  if (ret == 0) 
+    d->surface_num_coincident_channels = s->n_coincident_channels; 
+
+  return ret; 
+}
+
+
+
+int nuphase_surface_check_buffer(nuphase_dev_t *d) 
+{
+
+  if (NBD(d) < 2) return -1; 
+  int ret; 
+  uint8_t val[NP_SPI_BYTES]; 
+
+  USING(d); 
+  ret=append_read_register(d,SLAVE, REG_STATUS, val); 
+  ret += buffer_send(d,SLAVE);
+  DONE(d); 
+  if (ret) return ret > 0 ? -ret : ret; 
+  return !!(val[3] & 0x10); 
+
 }
 
 
