@@ -38,7 +38,7 @@ int main(int nargs, const char ** args)
   hd.deadtime[0] = 0; 
   hd.buffer_number = 0; 
   hd.channel_mask = 0xf; 
-  hd.channel_overflow = 0; 
+  hd.gate_flag = 0; 
   hd.buffer_mask =3; 
   hd.board_id[0] = 1; 
   hd.trig_type = 2; 

@@ -99,7 +99,7 @@ int main(int nargs, char ** args )
       nuphase_sw_trigger(dev); 
       nuphase_sw_trigger(dev); 
       nuphase_sw_trigger(dev); 
-      int got = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev); 
+      int got = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev,0,0,0); 
 
       nevents+= got; 
       int i; 

@@ -104,7 +104,7 @@ int main(int nargs, char ** args )
       }
     }
 
-    int nevents = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev); 
+    int nevents = nuphase_wait_for_and_read_multiple_events(dev,  &hd, &ev,0,0,0); 
     clock_gettime(CLOCK_REALTIME,&now); 
     nev+= nevents; 
     double hz = nev / (now.tv_sec - start.tv_sec + now.tv_nsec *1.e-9 - start.tv_nsec*1.e-9); 
