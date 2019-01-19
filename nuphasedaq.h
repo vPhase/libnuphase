@@ -31,7 +31,7 @@ typedef struct nuphase_dev nuphase_dev_t;
 
 /* the masks to read, = 0xf means surface */ 
 typedef uint8_t nuphase_buffer_mask_t; 
-const nuphase_buffer_mask_t NUPHASE_SURFACE_MASK = 0xf; 
+const nuphase_buffer_mask_t NUPHASE_SURFACE_MASK = 0xff; 
 
 typedef struct nuphase_trigger_enable
 {
