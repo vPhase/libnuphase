@@ -1732,10 +1732,23 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     if (doing_surface) 
     {
       USING(d); 
+#ifdef DEBUG_CLEAR_SURFACE
+      uint8_t buf_pre_clear[NP_SPI_BYTES]; 
+      uint8_t buf_clear_status[NP_SPI_BYTES]; 
+      append_read_register(d,SLAVE, REG_STATUS, buf_pre_clear); 
+#endif
       buffer_append(d,SLAVE, buf_clear_surface,0); 
+#ifdef DEBUG_CLEAR_SURFACE
+      append_read_register(d,SLAVE, REG_CLEAR_STATUS, buf_clear_status); 
+#endif 
       buffer_append(d,SLAVE, buf_change_to_deep[d->surface_num_coincident_channels],0); 
       buffer_send(d,SLAVE); 
       DONE(d); 
+#ifdef DEBUG_CLEAR_SURFACE
+      printf("DEBUG_CLEAR_SURFACE: before_clear: [%x,%x,%x,%x], after_clear [%x,%x,%x,%x]:\n", 
+             buf_pre_clear[0], buf_pre_clear[1], buf_pre_clear[2], buf_pre_clear[3], 
+             buf_clear_status[0], buf_clear_status[1], buf_clear_status[2], buf_clear_status[3]); 
+#endif
     }
     else  
     {
