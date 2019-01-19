@@ -1822,8 +1822,10 @@ int nuphase_read_status(nuphase_dev_t *d, nuphase_status_t * st, int surface)
   {
 
     buffer_append(d, SLAVE, buf_update_scalers,0);
-    buffer_append(d, SLAVE, buf_pick_scaler[24],surface_scaler_registers[0]);
-    buffer_append(d, SLAVE, buf_pick_scaler[25],surface_scaler_registers[1]);
+    buffer_append(d, SLAVE, buf_pick_scaler[24],0);
+    append_read_register(d,MASTER, REG_SCALER_READ, surface_scaler_registers[0]); 
+    buffer_append(d, SLAVE, buf_pick_scaler[25],0);
+    append_read_register(d,MASTER, REG_SCALER_READ, surface_scaler_registers[1]); 
     ret += buffer_send(d,SLAVE); 
   }
 
