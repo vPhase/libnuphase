@@ -986,6 +986,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
   if (timeout >0) clock_gettime(CLOCK_MONOTONIC, &start); 
 
   nuphase_which_board_t which = NBD(d) > 1 ? SLAVE : MASTER;
+  if (which == MASTER) surface_wait = 0; 
   float waited = 0; 
   // keep trying until we either get something, are cancelled, or exceed our timeout (if we have a timeout) 
   while(!something && !something_surface  &&  (timeout <= 0 || waited < timeout))
@@ -1039,6 +1040,9 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
   ret+=append_read_register(d, which,REG_STATUS, result); 
   ret+= buffer_send(d,which); 
   DONE(d); 
+#ifdef DEBUG_NUPHASE_CHECK_BUFFERS
+  printf("which is %d, result[3] is %x, !!(results[3] & 10) is %d\n", which, result[3], !!(results[3] & 10) ); 
+#endif
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (next) *next = (result[2] >> 4) & 0x3; 
   if (surface) *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 10); 
@@ -1533,6 +1537,13 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
         for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
         {
           CHK(append_read_register(d,ibd, REG_BEAM_POWER+ibeam, (uint8_t*)  &hd[iout]->beam_power[ibeam]))
+        }
+      }
+      else if (doing_surface) 
+      {
+        for(ibeam = 0; ibeam < NP_NUM_BEAMS; ibeam++)
+        {
+          hd[iout]->beam_power[ibeam] = 0; 
         }
       }
 
