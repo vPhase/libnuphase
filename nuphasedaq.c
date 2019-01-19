@@ -173,6 +173,7 @@ struct nuphase_dev
   // this needs to be cached as it's sent to the board when switching modes
   int surface_num_coincident_channels; 
   uint64_t surface_event_counter; 
+  int surface_throttle; 
   
 }; 
 
@@ -813,6 +814,8 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->surface_pretrigger = 4; 
   dev->surface_num_coincident_channels = 3;
 
+  dev->surface_throttle = 3; 
+
   return dev; 
 
 }
@@ -1027,7 +1030,23 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 
 }
 
+static int last_surface_second = 0; 
+static int nsurface_in_last_second = 0;
 
+static int surface_throttle_ok(nuphase_dev_t *d) 
+{
+  if (d->surface_throttle <= 0 ) return 1; 
+  struct timespec now; 
+  clock_gettime(CLOCK_REALTIME, &now); 
+  if ( now.tv_sec > last_surface_second) 
+  {
+    last_surface_second = now.tv_sec; 
+    nsurface_in_last_second = 0;
+    return 1; 
+  }
+
+  return nsurface_in_last_second++ <= d->surface_throttle;
+}
 
 nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, nuphase_which_board_t which, int * surface) 
 {
@@ -1045,7 +1064,10 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
 #endif
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (next) *next = (result[2] >> 4) & 0x3; 
-  if (surface) *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 0x10); 
+  if (surface && surface_throttle_ok(d)) 
+  {
+    *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 0x10); 
+  }
   return mask; 
 }
 
@@ -2456,29 +2478,16 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
 
 
 
-int nuphase_surface_check_buffer(nuphase_dev_t *d) 
-{
-
-  if (NBD(d) < 2 || d->surface_readout < 0) return -1; 
-  if (d->surface_readout == 0) return 0; 
-  int ret; 
-  uint8_t val[NP_SPI_BYTES]; 
-
-  USING(d); 
-  ret=append_read_register(d,SLAVE, REG_STATUS, val); 
-  ret += buffer_send(d,SLAVE);
-  DONE(d); 
-  if (ret) return ret > 0 ? -ret : ret; 
-  return !!(val[3] & 0x10); 
-
-}
-
-
 int nuphase_enable_surface_readout(nuphase_dev_t *d, int enable) 
 {
   if ( NBD(d) < 2 || d->surface_readout < 0) return 1; 
   d->surface_readout = !!enable; 
   return 0; 
 
+}
+
+void nuphase_surface_enable_throttle(nuphase_dev_t *d, int throttle) 
+{
+  d->surface_throttle = throttle; 
 }
 

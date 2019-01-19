@@ -478,9 +478,9 @@ int nuphase_surface_powerdown(nuphase_dev_t *d) ;
 /** Read a surface event, clearing the buffer. Does not check if anything is actually available! */ 
 int nuphase_surface_read_event(nuphase_dev_t *d, nuphase_header_t * head,nuphase_event_t *ev); 
 
-/** Check if a surface trigger is available. 
- * This returns 1 if one is, 0 if not, -1 on error */ 
-int nuphase_surface_check_buffer(nuphase_dev_t *d); 
+
+/** this throttles the number of times a surface event can be read in a second. 0 to clear. */ 
+void nuphase_surface_enable_throttle(nuphase_dev_t *d, int throttle); 
 
 // Configure the surface setup
 int nuphase_configure_surface(nuphase_dev_t *d, const nuphase_surface_setup_t * s);
