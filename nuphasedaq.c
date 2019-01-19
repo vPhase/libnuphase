@@ -1041,11 +1041,11 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
   ret+= buffer_send(d,which); 
   DONE(d); 
 #ifdef DEBUG_NUPHASE_CHECK_BUFFERS
-  printf("which is %d, result[3] is %x, !!(results[3] & 10) is %d\n", which, result[3], !!(results[3] & 10) ); 
+  printf("which is %d, result[3] is %x, !!(result[3] & 0x10) is %d\n", which, result[3], !!(result[3] & 0x10) ); 
 #endif
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (next) *next = (result[2] >> 4) & 0x3; 
-  if (surface) *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 10); 
+  if (surface) *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 0x10); 
   return mask; 
 }
 
