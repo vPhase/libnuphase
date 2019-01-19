@@ -1391,6 +1391,11 @@ int nuphase_wait_for_and_read_multiple_events(nuphase_dev_t * d,
   int ret = 0; 
 
   nuphase_wait(d,&mask,-1,(surface_header && surface_event && d->surface_readout == 1) ? &surface : 0 ); 
+
+#ifdef DEBUG_NUPHASE_WAIT_FOR_AND_READ
+  printf(" after nuphase_wait: MASK: %x, surface: %d\n", mask, surface); 
+#endif
+
   if (mask) 
   {
     int check; 
