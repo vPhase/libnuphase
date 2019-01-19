@@ -1732,8 +1732,8 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
     if (doing_surface) 
     {
       USING(d); 
-      buffer_append(d,SLAVE, buf_change_to_deep[d->surface_num_coincident_channels],0); 
       buffer_append(d,SLAVE, buf_clear_surface,0); 
+      buffer_append(d,SLAVE, buf_change_to_deep[d->surface_num_coincident_channels],0); 
       buffer_send(d,SLAVE); 
       DONE(d); 
     }
