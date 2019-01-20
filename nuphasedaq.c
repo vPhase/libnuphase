@@ -174,6 +174,8 @@ struct nuphase_dev
   int surface_num_coincident_channels; 
   uint64_t surface_event_counter; 
   int surface_throttle; 
+  int n_skipped_in_last_second; 
+  int last_second_skipped; 
   
 }; 
 
@@ -814,7 +816,9 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->surface_pretrigger = 4; 
   dev->surface_num_coincident_channels = 3;
 
-  dev->surface_throttle = 3; 
+  dev->surface_throttle = 0; 
+  dev->n_skipped_in_last_second = 0; 
+  dev->last_second_skipped = 0; 
 
   return dev; 
 
@@ -1033,6 +1037,7 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 static int last_surface_second = 0; 
 static int nsurface_in_last_second = 0;
 
+
 static int surface_throttle_ok(nuphase_dev_t *d) 
 {
   if (d->surface_throttle <= 0 ) return 1; 
@@ -1040,10 +1045,16 @@ static int surface_throttle_ok(nuphase_dev_t *d)
   clock_gettime(CLOCK_REALTIME, &now); 
   if ( now.tv_sec > last_surface_second) 
   {
+    if (nsurface_in_last_second > d->surface_throttle) 
+    {
+      d->n_skipped_in_last_second = nsurface_in_last_second - d->surface_throttle; 
+      d->last_second_skipped = last_surface_second; 
+    }
     last_surface_second = now.tv_sec; 
     nsurface_in_last_second = 0;
     return 1; 
   }
+
 
   return nsurface_in_last_second++ <= d->surface_throttle;
 }
@@ -2486,8 +2497,14 @@ int nuphase_enable_surface_readout(nuphase_dev_t *d, int enable)
 
 }
 
-void nuphase_surface_enable_throttle(nuphase_dev_t *d, int throttle) 
+void nuphase_surface_set_throttle(nuphase_dev_t *d, int throttle) 
 {
   d->surface_throttle = throttle; 
+}
+
+int nuphase_get_surface_skipped_in_last_second(nuphase_dev_t *d, int * last_second_skipped)
+{
+  if (last_second_skipped) *last_second_skipped = d->last_second_skipped; 
+  return d->n_skipped_in_last_second; 
 }
 

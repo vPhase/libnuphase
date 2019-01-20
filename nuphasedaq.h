@@ -480,7 +480,9 @@ int nuphase_surface_read_event(nuphase_dev_t *d, nuphase_header_t * head,nuphase
 
 
 /** this throttles the number of times a surface event can be read in a second. 0 to clear. */ 
-void nuphase_surface_enable_throttle(nuphase_dev_t *d, int throttle); 
+void nuphase_surface_set_throttle(nuphase_dev_t *d, int throttle); 
+
+int nuphase_get_surface_skipped_in_last_second(nuphase_dev_t *d, int * last_second_skipped); 
 
 // Configure the surface setup
 int nuphase_configure_surface(nuphase_dev_t *d, const nuphase_surface_setup_t * s);
