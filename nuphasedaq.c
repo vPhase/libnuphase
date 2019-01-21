@@ -1075,9 +1075,23 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
 #endif
   mask  = result[3] &  BUF_MASK; // only keep lower 4 bits.
   if (next) *next = (result[2] >> 4) & 0x3; 
-  if (surface && surface_throttle_ok(d)) 
+  if (surface && which == SLAVE) 
   {
-    *surface = d->surface_readout < 0 ? 0 :  !!(result[3]  & 0x10); 
+    int throttle_ok = surface_throttle_ok(d) ; 
+    int have_surface =  !!(result[3]  & 0x10); 
+    if (throttle_ok) 
+    {
+      *surface = d->surface_readout < 0 ? 0 : have_surface;
+    }
+    else if (have_surface)
+    {
+      USING(d); 
+      ret+= buffer_append(d, which, buf_clear_surface,0); 
+      ret+= buffer_send(d,which); // do we really want to send it now? it's not so urgent... 
+      DONE(d); 
+
+
+    }
   }
   return mask; 
 }
