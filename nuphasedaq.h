@@ -110,6 +110,7 @@ typedef struct nuphase_surface_setup
   uint8_t coincident_window_length; //10.7ns * value
   uint8_t antenna_mask; //see above surface antenna masks
   uint8_t n_coincident_channels; //1-6, 0 interpretted as 1
+  uint32_t min_hpol_threshold; 
   uint8_t require_h_greater_than_v; 
   uint8_t highpass_filter; 
 } nuphase_surface_setup_t;

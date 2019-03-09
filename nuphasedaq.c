@@ -101,6 +101,7 @@ typedef enum
   REG_PHASED_TRIGGER     = 0x54, 
   REG_VERIFICATION_MODE  = 0x55, 
   REG_THRESHOLDS         = 0x56, // add the threshold to this to get the right register
+  REG_HPOL_THRESHOLD     = 0x66, 
   REG_SET_READ_REG       = 0x6d, 
   REG_RESET_COUNTER      = 0x7e, 
   REG_RESET_ALL          = 0x7f 
@@ -2503,11 +2504,17 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
 
   uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, low_byte };
 
+  uint8_t buf3[NP_SPI_BYTES] = { REG_HPOL_THRESHOLD, 
+                                (s->min_hpol_threshold >> 16) & 0xff, 
+                                (s->min_hpol_threshold >> 8) & 0xff, 
+                                s->min_hpol_threshold & 0xff }; 
+
   if (NBD(d) < 2 || d->surface_readout < 0) return 1; 
 
   USING(d); 
   ret =buffer_append(d,SLAVE,buf1,0);
   ret+= buffer_append(d,SLAVE,buf2,0);
+  ret+= buffer_append(d,SLAVE,buf3,0);
   ret+=buffer_send(d,SLAVE); 
   DONE(d); 
 
