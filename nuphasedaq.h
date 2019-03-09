@@ -110,6 +110,8 @@ typedef struct nuphase_surface_setup
   uint8_t coincident_window_length; //10.7ns * value
   uint8_t antenna_mask; //see above surface antenna masks
   uint8_t n_coincident_channels; //1-6, 0 interpretted as 1
+  uint8_t require_h_greater_than_v; 
+  uint8_t highpass_filter; 
 } nuphase_surface_setup_t;
 
 
@@ -480,7 +482,7 @@ int nuphase_surface_read_event(nuphase_dev_t *d, nuphase_header_t * head,nuphase
 
 
 /** this throttles the number of times a surface event can be read in a second. 0 to clear. */ 
-void nuphase_surface_set_throttle(nuphase_dev_t *d, int throttle); 
+void nuphase_surface_set_throttle(nuphase_dev_t *d, int throttle, int clear_buffer_when_throttled); 
 
 int nuphase_get_surface_skipped_in_last_second(nuphase_dev_t *d, int * last_second_skipped); 
 

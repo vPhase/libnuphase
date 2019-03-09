@@ -171,11 +171,16 @@ struct nuphase_dev
   bbb_gpio_pin_t * gpio_pin; 
 
   // this needs to be cached as it's sent to the board when switching modes
-  int surface_num_coincident_channels; 
+  uint8_t surface_2_low_byte; 
   uint64_t surface_event_counter; 
+
+  //surface things
   int surface_throttle; 
   int n_skipped_in_last_second; 
   int last_second_skipped; 
+  int nsurface_in_last_second; 
+  int last_surface_second; 
+  int clear_buffer_when_throttled ; 
   
 }; 
 
@@ -252,8 +257,12 @@ static uint8_t buf_clear[1 << NP_NUM_BUFFER][NP_SPI_BYTES];
 static uint8_t buf_clear_surface[NP_SPI_BYTES] = {REG_CLEAR, 1,0,0}; ;
 static uint8_t buf_reset_buf[NP_SPI_BYTES] = {REG_CLEAR,0,1,0};
 static uint8_t buf_pick_scaler[N_PICK_SCALER][NP_SPI_BYTES]; 
-static uint8_t buf_change_to_surface[1+NP_NUM_SURFACE_CHANNELS][NP_SPI_BYTES]; 
-static uint8_t buf_change_to_deep[1+NP_NUM_SURFACE_CHANNELS][NP_SPI_BYTES]; 
+
+//possible states for change_to_surface / change_to_deep 
+// not all of these are valid, but it's easier to generate all of them 
+#define N_SURFACE_CHANGE_STATES 32 
+static uint8_t buf_change_to_surface[N_SURFACE_CHANGE_STATES][NP_SPI_BYTES]; 
+static uint8_t buf_change_to_deep[N_SURFACE_CHANGE_STATES][NP_SPI_BYTES]; 
 
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
 
@@ -266,7 +275,7 @@ static uint8_t buf_reset_counter[NP_SPI_BYTES] = {REG_RESET_COUNTER,0,0,1};
 static uint8_t buf_adc_clk_rst[NP_SPI_BYTES] = {REG_ADC_CLK_RST,0,0,0}; 
 static uint8_t buf_apply_attenuation[NP_SPI_BYTES] = {REG_ATTEN_APPLY,0,0,0}; 
 
-static void fillBuffers() __attribute__((constructor)); //this will fill them
+static void fillBuffers() __attribute__((constructor)); //this will initialize the static buffers. 
 
 
 void fillBuffers()
@@ -282,7 +291,7 @@ void fillBuffers()
 
   memset(buf_change_to_surface, 0, sizeof(buf_change_to_surface));
   memset(buf_change_to_deep, 0, sizeof(buf_change_to_deep));
-  for (i = 0; i <= NP_NUM_SURFACE_CHANNELS; i++) 
+  for (i = 0; i < N_SURFACE_CHANGE_STATES; i++) 
   {
     buf_change_to_surface[i][0] = REG_SURFACE_2; 
     buf_change_to_deep[i][0] = REG_SURFACE_2; 
@@ -293,8 +302,8 @@ void fillBuffers()
     buf_change_to_surface[i][2] = 1; 
     buf_change_to_deep[i][2] = 0; 
 
-    buf_change_to_surface[i][3] = i == 0 ? 0 : i-1; 
-    buf_change_to_deep[i][3] = i == 0 ? 0 : i-1; 
+    buf_change_to_surface[i][3] = i;
+    buf_change_to_deep[i][3] = i; 
   }
 
   memset(buf_set_read_reg,0,sizeof(buf_set_read_reg)); 
@@ -814,11 +823,14 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
 
   dev->pretrigger = 4; 
   dev->surface_pretrigger = 4; 
-  dev->surface_num_coincident_channels = 3;
+  dev->surface_2_low_byte = 2 | ( 1 << 3) | (1 << 4) ;
 
   dev->surface_throttle = 0; 
   dev->n_skipped_in_last_second = 0; 
   dev->last_second_skipped = 0; 
+  dev->last_surface_second = 0; 
+  dev->nsurface_in_last_second = 0; 
+  dev->clear_buffer_when_throttled = 0; 
 
   return dev; 
 
@@ -1034,8 +1046,6 @@ int nuphase_wait(nuphase_dev_t * d, nuphase_buffer_mask_t * ready_buffers, float
 
 }
 
-static int last_surface_second = 0; 
-static int nsurface_in_last_second = 0;
 
 
 static int surface_throttle_ok(nuphase_dev_t *d) 
@@ -1043,20 +1053,20 @@ static int surface_throttle_ok(nuphase_dev_t *d)
   if (d->surface_throttle <= 0 ) return 1; 
   struct timespec now; 
   clock_gettime(CLOCK_REALTIME, &now); 
-  if ( now.tv_sec > last_surface_second) 
+  if ( now.tv_sec > d->last_surface_second) 
   {
-    if (nsurface_in_last_second > d->surface_throttle) 
+    if (d->nsurface_in_last_second > d->surface_throttle) 
     {
-      d->n_skipped_in_last_second = nsurface_in_last_second - d->surface_throttle; 
-      d->last_second_skipped = last_surface_second; 
+      d->n_skipped_in_last_second = d->nsurface_in_last_second - d->surface_throttle; 
+      d->last_second_skipped = d->last_surface_second; 
     }
-    last_surface_second = now.tv_sec; 
-    nsurface_in_last_second = 0;
+    d->last_surface_second = now.tv_sec; 
+    d->nsurface_in_last_second = 0;
     return 1; 
   }
 
 
-  return nsurface_in_last_second++ <= d->surface_throttle;
+  return d->nsurface_in_last_second++ <= d->surface_throttle;
 }
 
 nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, nuphase_which_board_t which, int * surface) 
@@ -1083,7 +1093,7 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
     {
       *surface = d->surface_readout < 0 ? 0 : have_surface;
     }
-    else if (have_surface)
+    else if (have_surface && d->clear_buffer_when_throttled)
     {
       USING(d); 
       ret+= buffer_append(d, which, buf_clear_surface,0); 
@@ -1554,7 +1564,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
       if (doing_surface) 
       {
-        buffer_append(d, ibd, buf_change_to_surface[d->surface_num_coincident_channels],0); 
+        buffer_append(d, ibd, buf_change_to_surface[d->surface_2_low_byte],0); 
       }
 
 
@@ -1788,7 +1798,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 #ifdef DEBUG_CLEAR_SURFACE
       append_read_register(d,SLAVE, REG_CLEAR_STATUS, buf_clear_status); 
 #endif 
-      buffer_append(d,SLAVE, buf_change_to_deep[d->surface_num_coincident_channels],0); 
+      buffer_append(d,SLAVE, buf_change_to_deep[d->surface_2_low_byte],0); 
       buffer_send(d,SLAVE); 
       DONE(d); 
 #ifdef DEBUG_CLEAR_SURFACE
@@ -2486,7 +2496,13 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
 {
   int ret; 
   uint8_t buf1[NP_SPI_BYTES] = { REG_SURFACE_1, s->antenna_mask, s->coincident_window_length, s->vpp_threshold};
-  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, s->n_coincident_channels };
+
+  uint8_t low_byte = (s->n_coincident_channels > 0 ? s->n_coincident_channels -1 : 0 ) //subtract one here 
+                     | (!!s->highpass_filter) << 3
+                     | (!!s->require_h_greater_than_v) << 4 ; 
+
+  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, low_byte };
+
   if (NBD(d) < 2 || d->surface_readout < 0) return 1; 
 
   USING(d); 
@@ -2496,7 +2512,7 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
   DONE(d); 
 
   if (ret == 0) 
-    d->surface_num_coincident_channels = s->n_coincident_channels; 
+    d->surface_2_low_byte = low_byte; 
 
   return ret; 
 }
@@ -2511,9 +2527,10 @@ int nuphase_enable_surface_readout(nuphase_dev_t *d, int enable)
 
 }
 
-void nuphase_surface_set_throttle(nuphase_dev_t *d, int throttle) 
+void nuphase_surface_set_throttle(nuphase_dev_t *d, int throttle, int clear) 
 {
   d->surface_throttle = throttle; 
+  d->clear_buffer_when_throttled = clear; 
 }
 
 int nuphase_get_surface_skipped_in_last_second(nuphase_dev_t *d, int * last_second_skipped)
