@@ -1088,9 +1088,9 @@ nuphase_buffer_mask_t nuphase_check_buffers(nuphase_dev_t * d, uint8_t * next, n
   if (next) *next = (result[2] >> 4) & 0x3; 
   if (surface && which == SLAVE) 
   {
-    int throttle_ok = surface_throttle_ok(d) ; 
     int have_surface =  !!(result[3]  & 0x10); 
-    if (throttle_ok) 
+
+    if (have_surface && surface_throttle_ok(d)) 
     {
       *surface = d->surface_readout < 0 ? 0 : have_surface;
     }
