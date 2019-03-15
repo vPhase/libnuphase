@@ -182,6 +182,8 @@ struct nuphase_dev
   int nsurface_in_last_second; 
   int last_surface_second; 
   int clear_buffer_when_throttled ; 
+
+  int doing_surface; 
   
 }; 
 
@@ -832,6 +834,7 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->last_surface_second = 0; 
   dev->nsurface_in_last_second = 0; 
   dev->clear_buffer_when_throttled = 0; 
+  dev->doing_surface = 0; 
 
   return dev; 
 
@@ -1566,6 +1569,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       if (doing_surface) 
       {
         buffer_append(d, ibd, buf_change_to_surface[d->surface_2_low_byte],0); 
+        d->doing_surface = 1; 
       }
 
 
@@ -1800,6 +1804,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
       append_read_register(d,SLAVE, REG_CLEAR_STATUS, buf_clear_status); 
 #endif 
       buffer_append(d,SLAVE, buf_change_to_deep[d->surface_2_low_byte],0); 
+      d->doing_surface = 0; 
       buffer_send(d,SLAVE); 
       DONE(d); 
 #ifdef DEBUG_CLEAR_SURFACE
@@ -2502,7 +2507,7 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
                      | (!!s->highpass_filter) << 3
                      | (!!s->require_h_greater_than_v) << 4 ; 
 
-  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, low_byte };
+  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, d->doing_surface, low_byte };
 
   uint8_t buf3[NP_SPI_BYTES] = { REG_HPOL_THRESHOLD, 
                                 (s->min_hpol_threshold >> 16) & 0xff, 
