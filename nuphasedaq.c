@@ -90,6 +90,7 @@ typedef enum
   REG_MODE               = 0x42, //readout mode
   REG_RAM_ADDR           = 0x45, //ram address
   REG_READ               = 0x47, //send data to spi miso 
+  REG_SURFACE_SELECT     = 0x4a,
   REG_EXT_INPUT_CONFIG   = 0x4b, 
   REG_PRETRIGGER         = 0x4c, 
   REG_CLEAR              = 0x4d, //clear buffers 
@@ -172,7 +173,6 @@ struct nuphase_dev
   bbb_gpio_pin_t * gpio_pin; 
 
   // this needs to be cached as it's sent to the board when switching modes
-  uint8_t surface_2_low_byte; 
   uint64_t surface_event_counter; 
 
   //surface things
@@ -183,7 +183,6 @@ struct nuphase_dev
   int last_surface_second; 
   int clear_buffer_when_throttled ; 
 
-  int doing_surface; 
   
 }; 
 
@@ -264,8 +263,8 @@ static uint8_t buf_pick_scaler[N_PICK_SCALER][NP_SPI_BYTES];
 //possible states for change_to_surface / change_to_deep 
 // not all of these are valid, but it's easier to generate all of them 
 #define N_SURFACE_CHANGE_STATES 32 
-static uint8_t buf_change_to_surface[N_SURFACE_CHANGE_STATES][NP_SPI_BYTES]; 
-static uint8_t buf_change_to_deep[N_SURFACE_CHANGE_STATES][NP_SPI_BYTES]; 
+static uint8_t buf_change_to_surface[NP_SPI_BYTES] = { REG_SURFACE_SELECT,0,0,1}; 
+static uint8_t buf_change_to_deep[NP_SPI_BYTES] = {REG_SURFACE_SELECT,0,0,0}; 
 
 static uint8_t buf_read[NP_SPI_BYTES] __attribute__((unused))= {REG_READ,0,0,0}  ; 
 
@@ -290,23 +289,6 @@ void fillBuffers()
   {
     buf_mode[i][0] = REG_MODE; 
     buf_mode[i][3] = i; 
-  }
-
-  memset(buf_change_to_surface, 0, sizeof(buf_change_to_surface));
-  memset(buf_change_to_deep, 0, sizeof(buf_change_to_deep));
-  for (i = 0; i < N_SURFACE_CHANGE_STATES; i++) 
-  {
-    buf_change_to_surface[i][0] = REG_SURFACE_2; 
-    buf_change_to_deep[i][0] = REG_SURFACE_2; 
-
-    buf_change_to_surface[i][1] = 1; 
-    buf_change_to_deep[i][1] = 1; 
-
-    buf_change_to_surface[i][2] = 1; 
-    buf_change_to_deep[i][2] = 0; 
-
-    buf_change_to_surface[i][3] = i;
-    buf_change_to_deep[i][3] = i; 
   }
 
   memset(buf_set_read_reg,0,sizeof(buf_set_read_reg)); 
@@ -826,7 +808,6 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
 
   dev->pretrigger = 4; 
   dev->surface_pretrigger = 4; 
-  dev->surface_2_low_byte = 2 | ( 1 << 3) | (1 << 4) ;
 
   dev->surface_throttle = 0; 
   dev->n_skipped_in_last_second = 0; 
@@ -834,7 +815,6 @@ nuphase_dev_t * nuphase_open(const char * devicename_master,
   dev->last_surface_second = 0; 
   dev->nsurface_in_last_second = 0; 
   dev->clear_buffer_when_throttled = 0; 
-  dev->doing_surface = 0; 
 
   return dev; 
 
@@ -1568,8 +1548,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 
       if (doing_surface) 
       {
-        buffer_append(d, ibd, buf_change_to_surface[d->surface_2_low_byte],0); 
-        d->doing_surface = 1; 
+        buffer_append(d, ibd, buf_change_to_surface,0); 
       }
 
 
@@ -1803,8 +1782,7 @@ int nuphase_read_multiple_ptr(nuphase_dev_t * d, nuphase_buffer_mask_t mask, nup
 #ifdef DEBUG_CLEAR_SURFACE
       append_read_register(d,SLAVE, REG_CLEAR_STATUS, buf_clear_status); 
 #endif 
-      buffer_append(d,SLAVE, buf_change_to_deep[d->surface_2_low_byte],0); 
-      d->doing_surface = 0; 
+      buffer_append(d,SLAVE, buf_change_to_deep,0); 
       buffer_send(d,SLAVE); 
       DONE(d); 
 #ifdef DEBUG_CLEAR_SURFACE
@@ -2507,7 +2485,7 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
                      | (!!s->highpass_filter) << 3
                      | (!!s->require_h_greater_than_v) << 4 ; 
 
-  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, d->doing_surface, low_byte };
+  uint8_t buf2[NP_SPI_BYTES] = { REG_SURFACE_2, 1, 0, low_byte };
 
   uint8_t buf3[NP_SPI_BYTES] = { REG_HPOL_THRESHOLD, 
                                 (s->min_hpol_threshold >> 16) & 0xff, 
@@ -2522,9 +2500,6 @@ int nuphase_configure_surface(nuphase_dev_t* d, const nuphase_surface_setup_t *s
   ret+= buffer_append(d,SLAVE,buf3,0);
   ret+=buffer_send(d,SLAVE); 
   DONE(d); 
-
-  if (ret == 0) 
-    d->surface_2_low_byte = low_byte; 
 
   return ret; 
 }
